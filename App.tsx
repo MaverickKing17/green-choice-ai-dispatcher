@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality, Type, FunctionDeclaration } from "@google/genai";
 import { AgentPersona, MessageLog, BlobData } from './types';
-import { Mic, MicOff, Phone, PhoneOff, AlertTriangle, Leaf, History, Activity } from 'lucide-react';
+import { Mic, MicOff, Phone, PhoneOff, AlertTriangle, Leaf, History, Activity, Radio, ArrowRightLeft } from 'lucide-react';
 
 // --- Constants & Config ---
 const API_KEY = process.env.API_KEY || ''; // Injected by environment
@@ -112,6 +112,35 @@ async function decodeAudioData(
   return buffer;
 }
 
+// Synthesize a digital "handoff" chime using Web Audio API
+function playHandoffSound(ctx: AudioContext) {
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+
+  const now = ctx.currentTime;
+  
+  // Alert/Digital Switch Sound
+  osc.type = 'sawtooth';
+  
+  // First tone (Warning)
+  osc.frequency.setValueAtTime(440, now);
+  osc.frequency.linearRampToValueAtTime(880, now + 0.1);
+  
+  // Second tone (Confirmation)
+  osc.frequency.setValueAtTime(880, now + 0.2);
+  osc.frequency.exponentialRampToValueAtTime(1760, now + 0.4);
+
+  // Envelope
+  gain.gain.setValueAtTime(0.05, now);
+  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+
+  osc.start(now);
+  osc.stop(now + 0.5);
+}
+
 // --- Components ---
 
 const Visualizer: React.FC<{ volume: number; persona: AgentPersona; isActive: boolean }> = ({ volume, persona, isActive }) => {
@@ -159,6 +188,7 @@ export default function App() {
   // State
   const [isConnected, setIsConnected] = useState(false);
   const [currentPersona, setCurrentPersona] = useState<AgentPersona>(AgentPersona.CHLOE);
+  const [isSwitching, setIsSwitching] = useState(false);
   const [volumeLevel, setVolumeLevel] = useState(0);
   const [transcripts, setTranscripts] = useState<MessageLog[]>([]);
   const [isSurveyMode, setIsSurveyMode] = useState(false);
@@ -184,8 +214,6 @@ export default function App() {
 
   const disconnect = useCallback(() => {
     if (sessionRef.current) {
-      // There isn't a strictly documented close() on the session object in the preview, 
-      // but we stop processing.
       sessionRef.current = null;
     }
 
@@ -215,6 +243,7 @@ export default function App() {
 
     setIsConnected(false);
     setVolumeLevel(0);
+    setIsSwitching(false);
   }, []);
 
   const connect = async () => {
@@ -238,7 +267,6 @@ export default function App() {
       const ai = new GoogleGenAI({ apiKey: API_KEY });
 
       // 4. Setup Connection Promise
-      // We use a promise wrapper to ensure we have the session before sending data
       let resolveSession: (s: any) => void;
       const sessionPromise = new Promise<any>(resolve => {
         resolveSession = resolve;
@@ -256,17 +284,17 @@ export default function App() {
         callbacks: {
           onopen: () => {
             console.log('Gemini Live Session Opened');
-            resolveSession(session); // Resolve our internal promise
+            resolveSession(session);
             setIsConnected(true);
-            setCurrentPersona(AgentPersona.CHLOE); // Reset to Chloe on new call
+            setCurrentPersona(AgentPersona.CHLOE);
             setIsSurveyMode(false);
             setTranscripts([]);
+            setIsSwitching(false);
 
             // Start Audio Input Pipeline
             const source = inputCtx.createMediaStreamSource(stream);
             inputSourceRef.current = source;
             
-            // ScriptProcessor is deprecated but easiest for raw PCM in vanilla React without Worklet file loading complexity
             const processor = inputCtx.createScriptProcessor(4096, 1, 1);
             processorRef.current = processor;
 
@@ -297,12 +325,25 @@ export default function App() {
                 console.log('Tool Call:', fc.name);
                 
                 if (fc.name === 'switchToSam') {
-                  setCurrentPersona(AgentPersona.SAM);
+                  // Trigger Switch Animation & Sound
+                  if (outputAudioContextRef.current) {
+                    playHandoffSound(outputAudioContextRef.current);
+                  }
+                  setIsSwitching(true);
+                  
+                  // Add log immediately
                   setTranscripts(prev => [...prev, {
                     role: 'system',
-                    text: '⚠️ EMERGENCY DETECTED: Handoff to Sam initiated.',
+                    text: '⚠️ EMERGENCY DETECTED: Transferring to Sam...',
                     timestamp: new Date()
                   }]);
+
+                  // Delay the actual persona state change slightly for the effect
+                  setTimeout(() => {
+                    setCurrentPersona(AgentPersona.SAM);
+                    setIsSwitching(false);
+                  }, 2000);
+
                 } else if (fc.name === 'startSurvey') {
                   setIsSurveyMode(true);
                   setTranscripts(prev => [...prev, {
@@ -332,17 +373,12 @@ export default function App() {
                  setTranscripts(prev => {
                    const last = prev[prev.length - 1];
                    if (last && last.role === 'user') {
-                     // Simple debounce/append for streaming transcripts
                      return [...prev.slice(0, -1), { ...last, text: last.text + text }];
                    }
                    return [...prev, { role: 'user', text, timestamp: new Date() }];
                  });
                }
             }
-            if (message.serverContent?.modelTurn?.parts?.[0]?.text) {
-               // Model text output (usually hidden if audio is on, but useful for logs)
-            }
-
 
             // Handle Audio Output
             const base64Audio = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
@@ -408,6 +444,7 @@ export default function App() {
 
   // --- Render Helpers ---
   const isChloe = currentPersona === AgentPersona.CHLOE;
+  // Determine styles based on Persona OR Switching state
   const themeColor = isChloe ? 'green' : 'red';
   const bgColor = isChloe ? 'bg-emerald-50' : 'bg-red-50';
   const borderColor = isChloe ? 'border-emerald-200' : 'border-red-200';
@@ -428,8 +465,19 @@ export default function App() {
       </header>
 
       {/* Main Agent Card */}
-      <div className={`w-full max-w-md bg-white rounded-3xl shadow-xl overflow-hidden border-2 ${borderColor} transition-all duration-500`}>
+      <div className={`w-full max-w-md bg-white rounded-3xl shadow-xl overflow-hidden border-2 ${borderColor} transition-all duration-500 relative`}>
         
+        {/* Switching Overlay */}
+        {isSwitching && (
+          <div className="absolute inset-0 z-50 bg-white/90 backdrop-blur-sm flex flex-col items-center justify-center animate-fade-in">
+             <div className="bg-red-100 p-4 rounded-full mb-4 animate-bounce">
+                <ArrowRightLeft className="w-10 h-10 text-red-600" />
+             </div>
+             <h3 className="text-2xl font-bold text-gray-900 mb-1">Transferring...</h3>
+             <p className="text-sm text-gray-500 font-medium">Connecting to Emergency Dispatch</p>
+          </div>
+        )}
+
         {/* Agent Persona Visual */}
         <div className={`relative h-64 w-full flex flex-col items-center justify-center p-6 transition-colors duration-500 ${isChloe ? 'bg-emerald-100' : 'bg-red-100'}`}>
           <div className="absolute top-4 right-4">
