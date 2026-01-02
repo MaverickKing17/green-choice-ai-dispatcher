@@ -1,0 +1,7 @@
+{
+  "name": "Green Choice Voice AI",
+  "description": "Dual-persona voice agent for HVAC dispatching featuring Chloe (Service) and Sam (Emergency).",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
