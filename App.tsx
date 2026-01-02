@@ -1,20 +1,18 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality, Type, FunctionDeclaration } from "@google/genai";
 import { AgentPersona, MessageLog, BlobData } from './types';
-import { Mic, MicOff, Phone, PhoneOff, AlertTriangle, Leaf, History, Activity, Radio, ArrowRightLeft } from 'lucide-react';
+import { Phone, PhoneOff, AlertTriangle, Leaf, History, Activity, ArrowRightLeft, ThermometerSun, ShieldAlert, CheckCircle2 } from 'lucide-react';
 
 // --- Constants & Config ---
 
-// Safe API Key retrieval for Vite/Vercel environments to prevent "process is not defined" crashes
+// Safe API Key retrieval
 const getApiKey = (): string => {
   try {
-    // Check for Vite-specific env var first (standard for Vercel + Vite)
     // @ts-ignore
     if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_KEY) {
       // @ts-ignore
       return import.meta.env.VITE_API_KEY;
     }
-    // Check for standard process.env (fallback)
     if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
       return process.env.API_KEY;
     }
@@ -32,79 +30,60 @@ const SYSTEM_INSTRUCTION = `
 You are the Voice AI system for 'Green Choice Heating & Cooling' in East York.
 You have two distinct personas. You start as CHLOE.
 
-PERSONA 1: CHLOE (Front-Desk)
-- Tone: Warm, polite, enthusiastic, professional.
-- Role: Rebate expert, general inquiries.
-- Key Knowledge: 2026 Home Renovation Savings (HRS) program.
-  
-  **QUALIFICATION LOGIC (Memorize This):**
-  1. **NON-GAS HEATING (Electricity, Oil, Propane, or Wood):**
-     - **Cold Climate Air Source Heat Pump:** You get **$1,250 per ton**, up to a maximum of **$7,500**.
-     - **Ground Source Heat Pump:** You get **$2,000 per ton**, up to a maximum of **$12,000**.
-     
-  2. **ENBRIDGE GAS CUSTOMERS (Natural Gas):**
-     - **Cold Climate Air Source Heat Pump:** You get **$500 per ton**, up to a maximum of **$2,000**.
-     - **Ground Source Heat Pump:** You get a flat rebate of **$3,000**.
-     
+PERSONA 1: CHLOE (Front-Desk & Rebate Specialist)
+- Tone: Warm, energetic, knowledgeable, and patient.
+- Role: Explain the "Home Renovation Savings Program" (HRS) and book routine assessments.
+- KNOWLEDGE BASE (Strict Adherence Required):
+  1. **NON-GAS HEATING (Current system is Electric, Oil, Propane, or Wood):**
+     - **Air Source Heat Pump:** Rebate is **$1,250 per ton**, up to a maximum of **$7,500**.
+     - **Ground Source Heat Pump:** Rebate is **$2,000 per ton**, up to a maximum of **$12,000**.
+  2. **ENBRIDGE GAS CUSTOMERS (Current system is Natural Gas):**
+     - **Air Source Heat Pump:** Rebate is **$500 per ton**, up to a maximum of **$2,000**.
+     - **Ground Source Heat Pump:** Flat rebate of **$3,000**.
   3. **RENTALS:**
-     - If renting a heat pump (any heating source), the rebate matches the Enbridge Gas tier ($500/ton up to $2,000).
+     - Rentals follow the Enbridge Gas tier ($500/ton up to $2,000) regardless of fuel type.
 
-- Task: You MUST ask specific qualifying questions to determine the correct rebate:
-  1. "To give you the exact numbers, what is your home's current primary heating source? Is it natural gas, electricity, oil, or propane?"
-  2. "Are you an Enbridge Gas customer?"
-- Goal: Explicitly confirm the exact dollar amount they qualify for based on the "per ton" rules above.
+- PROTOCOL:
+  1. Greet warmly: "Thanks for calling Green Choice! Are you looking for a repair or information on the 2026 heat pump rebates?"
+  2. If Rebates: You MUST ask: "What fuel specifically heats your home right now? Natural gas, electricity, or oil?"
+  3. Calculate and confirm their potential savings based on the logic above.
+  4. Collect Name/Phone to book an assessment.
 
 PERSONA 2: SAM (Emergency Dispatcher)
-- Tone: Calm, direct, fast, authoritative.
-- Role: Emergency response.
-- Triggers: "gas smell", "no heat", "water leak", "furnace not working", "boiler broken", "major leak", "banging noise".
-- Task: Promise 4-hour response, get address immediately.
+- Tone: Serious, rapid, authoritative, reassuring.
+- Role: Immediate safety and dispatch.
+- Triggers: "gas smell", "no heat", "leaking water", "loud banging", "smoke", "carbon monoxide".
+- PROTOCOL:
+  1. IF "Gas Smell" is mentioned: "For your safety, hang up immediately, leave the house, and call 911."
+  2. FOR OTHER EMERGENCIES: "I'm dispatching a tech. I need your address now. We have a 4-hour response guarantee."
 
-CRITICAL LOGIC FLOW:
-1. Start the conversation as CHLOE. Greet the customer warmly.
-2. Listen carefully to the user.
-3. IF the user mentions "gas smell", "no heat", "water leak", "furnace not working", "boiler broken", or "major leak":
-   a. You MUST say exactly: "One moment, I'm handing you over to Sam, our emergency specialist."
-   b. Call the tool function \`switchToSam\`.
-   c. IMMEDIATELY switch your tone and persona to SAM for the rest of the conversation. Do not switch back.
-4. IF it is a routine booking/inquiry (CHLOE):
-   a. Ask the qualifying questions about their EXISTING heating setup.
-   b. Based on their answer, clearly explain the calculation (e.g., "Since you heat with oil, you qualify for the higher tier of $1,250 per ton, up to $7,500!").
-   c. Collect name and phone number.
-   d. If booking is complete, call the tool function \`startSurvey\`.
-   e. Ask satisfaction questions.
-
-Keep responses concise (under 30 seconds) and spoken naturally.
+LOGIC FLOW:
+1. Listen for emergency keywords. 
+2. IF keywords detected -> Say: "This sounds urgent. Connecting you to Sam, our emergency dispatcher." -> Call tool \`switchToSam\`.
+3. IF routine -> Continue as Chloe.
+4. IF booking complete -> Call tool \`startSurvey\`.
 `;
 
 // --- Tool Definitions ---
 const switchToSamTool: FunctionDeclaration = {
   name: 'switchToSam',
-  description: 'Triggers the visual and logical switch to Sam, the emergency dispatcher, when an emergency is detected.',
-  parameters: {
-    type: Type.OBJECT,
-    properties: {},
-  },
+  description: 'Triggers the persona switch to Sam when an emergency keyword is detected.',
+  parameters: { type: Type.OBJECT, properties: {} },
 };
 
 const startSurveyTool: FunctionDeclaration = {
   name: 'startSurvey',
-  description: 'Triggers the satisfaction survey mode after a routine call is wrapped up.',
-  parameters: {
-    type: Type.OBJECT,
-    properties: {},
-  },
+  description: 'Triggers the satisfaction survey mode after a call is wrapped up.',
+  parameters: { type: Type.OBJECT, properties: {} },
 };
 
 const tools = [{ functionDeclarations: [switchToSamTool, startSurveyTool] }];
 
 // --- Audio Helpers ---
-
 function createBlob(data: Float32Array): BlobData {
   const l = data.length;
   const int16 = new Int16Array(l);
   for (let i = 0; i < l; i++) {
-    // Clamp values to [-1, 1] before scaling
     const s = Math.max(-1, Math.min(1, data[i]));
     int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
   }
@@ -124,16 +103,10 @@ function decodeAudio(base64: string): Uint8Array {
   return bytes;
 }
 
-async function decodeAudioData(
-  data: Uint8Array,
-  ctx: AudioContext,
-  sampleRate: number,
-  numChannels: number,
-): Promise<AudioBuffer> {
+async function decodeAudioData(data: Uint8Array, ctx: AudioContext, sampleRate: number, numChannels: number): Promise<AudioBuffer> {
   const dataInt16 = new Int16Array(data.buffer);
   const frameCount = dataInt16.length / numChannels;
   const buffer = ctx.createBuffer(numChannels, frameCount, sampleRate);
-
   for (let channel = 0; channel < numChannels; channel++) {
     const channelData = buffer.getChannelData(channel);
     for (let i = 0; i < frameCount; i++) {
@@ -143,31 +116,19 @@ async function decodeAudioData(
   return buffer;
 }
 
-// Synthesize a digital "handoff" chime using Web Audio API
 function playHandoffSound(ctx: AudioContext) {
   const osc = ctx.createOscillator();
   const gain = ctx.createGain();
-
   osc.connect(gain);
   gain.connect(ctx.destination);
-
   const now = ctx.currentTime;
-  
-  // Alert/Digital Switch Sound
   osc.type = 'sawtooth';
-  
-  // First tone (Warning)
   osc.frequency.setValueAtTime(440, now);
   osc.frequency.linearRampToValueAtTime(880, now + 0.1);
-  
-  // Second tone (Confirmation)
   osc.frequency.setValueAtTime(880, now + 0.2);
   osc.frequency.exponentialRampToValueAtTime(1760, now + 0.4);
-
-  // Envelope
   gain.gain.setValueAtTime(0.05, now);
   gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
-
   osc.start(now);
   osc.stop(now + 0.5);
 }
@@ -175,37 +136,46 @@ function playHandoffSound(ctx: AudioContext) {
 // --- Components ---
 
 const Visualizer: React.FC<{ volume: number; persona: AgentPersona; isActive: boolean }> = ({ volume, persona, isActive }) => {
-  const bars = 5;
+  const bars = 12;
+  const isChloe = persona === AgentPersona.CHLOE;
   
   return (
-    <div className="flex items-center justify-center space-x-2 h-16">
+    <div className="flex items-center justify-center space-x-1.5 h-16 w-full px-8">
       {isActive ? Array.from({ length: bars }).map((_, i) => {
-        // Simple visualizer logic based on volume
-        const height = Math.max(10, Math.min(100, volume * (100 + i * 20))); 
-        const colorClass = persona === AgentPersona.CHLOE ? 'bg-green-500' : 'bg-red-600';
+        // Create a wave effect
+        const wave = Math.sin(i * 0.5 + Date.now() / 100) * 0.5 + 0.5;
+        const height = Math.max(15, Math.min(100, volume * (150 + i * 10) * wave + 20)); 
+        const colorClass = isChloe ? 'bg-emerald-400' : 'bg-red-500';
         
         return (
           <div
             key={i}
-            className={`w-3 rounded-full transition-all duration-100 ${colorClass}`}
+            className={`w-2 rounded-full transition-all duration-75 ${colorClass} shadow-[0_0_10px_rgba(0,0,0,0.1)]`}
             style={{ height: `${height}%` }}
           />
         );
       }) : (
-        <div className="text-gray-400 text-sm font-medium">Ready to connect...</div>
+        <div className="flex items-center space-x-2 text-gray-400 animate-pulse">
+           <div className="w-2 h-2 bg-gray-300 rounded-full"></div>
+           <div className="w-2 h-2 bg-gray-300 rounded-full animation-delay-200"></div>
+           <div className="w-2 h-2 bg-gray-300 rounded-full animation-delay-400"></div>
+        </div>
       )}
     </div>
   );
 };
 
-const TranscriptMessage: React.FC<{ msg: MessageLog }> = ({ msg }) => {
+const ChatBubble: React.FC<{ msg: MessageLog; persona: AgentPersona }> = ({ msg, persona }) => {
   const isUser = msg.role === 'user';
+  const isChloe = persona === AgentPersona.CHLOE;
+  const agentColor = isChloe ? 'bg-emerald-50 text-emerald-900 border-emerald-100' : 'bg-red-50 text-red-900 border-red-100';
+
   return (
-    <div className={`flex w-full ${isUser ? 'justify-end' : 'justify-start'} mb-3`}>
-      <div className={`max-w-[80%] rounded-lg px-4 py-2 text-sm ${
+    <div className={`flex w-full ${isUser ? 'justify-end' : 'justify-start'} mb-4 animate-in fade-in slide-in-from-bottom-2 duration-300`}>
+      <div className={`max-w-[85%] rounded-2xl px-5 py-3 text-sm font-medium shadow-sm ${
         isUser 
-          ? 'bg-blue-600 text-white rounded-br-none' 
-          : 'bg-white border border-gray-200 text-gray-800 rounded-bl-none shadow-sm'
+          ? 'bg-gray-800 text-white rounded-br-none' 
+          : `${agentColor} border rounded-bl-none`
       }`}>
         {msg.text}
       </div>
@@ -216,7 +186,6 @@ const TranscriptMessage: React.FC<{ msg: MessageLog }> = ({ msg }) => {
 // --- Main App ---
 
 export default function App() {
-  // State
   const [isConnected, setIsConnected] = useState(false);
   const [currentPersona, setCurrentPersona] = useState<AgentPersona>(AgentPersona.CHLOE);
   const [isSwitching, setIsSwitching] = useState(false);
@@ -225,53 +194,27 @@ export default function App() {
   const [isSurveyMode, setIsSurveyMode] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Refs for Audio/Gemini logic
   const nextStartTime = useRef<number>(0);
   const inputAudioContextRef = useRef<AudioContext | null>(null);
   const outputAudioContextRef = useRef<AudioContext | null>(null);
   const inputSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
-  const sessionRef = useRef<any>(null); // To hold the active session
+  const sessionRef = useRef<any>(null);
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
 
-  // Initialization
   useEffect(() => {
-    // Cleanup on unmount
-    return () => {
-      disconnect();
-    };
+    return () => disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const disconnect = useCallback(() => {
-    if (sessionRef.current) {
-      sessionRef.current = null;
-    }
-
-    // Stop audio contexts
-    if (inputAudioContextRef.current) {
-      inputAudioContextRef.current.close();
-      inputAudioContextRef.current = null;
-    }
-    if (outputAudioContextRef.current) {
-      outputAudioContextRef.current.close();
-      outputAudioContextRef.current = null;
-    }
-    if (processorRef.current) {
-      processorRef.current.disconnect();
-      processorRef.current = null;
-    }
-    if (inputSourceRef.current) {
-      inputSourceRef.current.disconnect();
-      inputSourceRef.current = null;
-    }
-    
-    // Stop all playing sources
-    sourcesRef.current.forEach(source => {
-      try { source.stop(); } catch(e) {}
-    });
+    sessionRef.current = null;
+    if (inputAudioContextRef.current) inputAudioContextRef.current.close();
+    if (outputAudioContextRef.current) outputAudioContextRef.current.close();
+    if (processorRef.current) processorRef.current.disconnect();
+    if (inputSourceRef.current) inputSourceRef.current.disconnect();
+    sourcesRef.current.forEach(source => { try { source.stop(); } catch(e) {} });
     sourcesRef.current.clear();
-
     setIsConnected(false);
     setVolumeLevel(0);
     setIsSwitching(false);
@@ -280,34 +223,22 @@ export default function App() {
   const connect = async () => {
     setErrorMsg(null);
     try {
-      if (!API_KEY) {
-        throw new Error("API Key not found");
-      }
+      if (!API_KEY) throw new Error("API Key not found");
 
-      // 1. Initialize Audio Contexts
       const InputContextClass = (window.AudioContext || (window as any).webkitAudioContext);
       const inputCtx = new InputContextClass({ sampleRate: 16000 });
       const outputCtx = new InputContextClass({ sampleRate: 24000 });
-      
       inputAudioContextRef.current = inputCtx;
       outputAudioContextRef.current = outputCtx;
-      
       const outputNode = outputCtx.createGain();
       outputNode.connect(outputCtx.destination);
 
-      // 2. Get Microphone Stream
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      
-      // 3. Initialize Gemini Client
       const ai = new GoogleGenAI({ apiKey: API_KEY });
 
-      // 4. Setup Connection Promise
       let resolveSession: (s: any) => void;
-      const sessionPromise = new Promise<any>(resolve => {
-        resolveSession = resolve;
-      });
+      const sessionPromise = new Promise<any>(resolve => { resolveSession = resolve; });
 
-      // 5. Connect to Live API
       const session = await ai.live.connect({
         model: MODEL_NAME,
         config: {
@@ -318,7 +249,6 @@ export default function App() {
         },
         callbacks: {
           onopen: () => {
-            console.log('Gemini Live Session Opened');
             resolveSession(session);
             setIsConnected(true);
             setCurrentPersona(AgentPersona.CHLOE);
@@ -326,313 +256,246 @@ export default function App() {
             setTranscripts([]);
             setIsSwitching(false);
 
-            // Start Audio Input Pipeline
             const source = inputCtx.createMediaStreamSource(stream);
             inputSourceRef.current = source;
-            
             const processor = inputCtx.createScriptProcessor(4096, 1, 1);
             processorRef.current = processor;
 
             processor.onaudioprocess = (e) => {
               const inputData = e.inputBuffer.getChannelData(0);
-              
-              // Calculate volume for visualizer
               let sum = 0;
               for(let i=0; i<inputData.length; i++) sum += inputData[i] * inputData[i];
               const rms = Math.sqrt(sum / inputData.length);
-              setVolumeLevel(prev => Math.max(rms * 5, prev * 0.9)); // Smooth decay
+              setVolumeLevel(prev => Math.max(rms * 5, prev * 0.9)); 
 
-              const pcmBlob = createBlob(inputData);
-              
-              // Send to Gemini
-              sessionPromise.then(sess => {
-                sess.sendRealtimeInput({ media: pcmBlob });
-              });
+              sessionPromise.then(sess => sess.sendRealtimeInput({ media: createBlob(inputData) }));
             };
-
             source.connect(processor);
             processor.connect(inputCtx.destination);
           },
           onmessage: async (message: LiveServerMessage) => {
-            // Handle Tool Calls (The Brains of the Persona Switch)
             if (message.toolCall) {
               for (const fc of message.toolCall.functionCalls) {
-                console.log('Tool Call:', fc.name);
-                
                 if (fc.name === 'switchToSam') {
-                  // Trigger Switch Animation & Sound
-                  if (outputAudioContextRef.current) {
-                    playHandoffSound(outputAudioContextRef.current);
-                  }
+                  if (outputAudioContextRef.current) playHandoffSound(outputAudioContextRef.current);
                   setIsSwitching(true);
-                  
-                  // Add log immediately
-                  setTranscripts(prev => [...prev, {
-                    role: 'system',
-                    text: '⚠️ EMERGENCY DETECTED: Transferring to Sam...',
-                    timestamp: new Date()
-                  }]);
-
-                  // Delay the actual persona state change slightly for the effect
+                  setTranscripts(prev => [...prev, { role: 'system', text: 'Transferring to Priority Dispatch...', timestamp: new Date() }]);
                   setTimeout(() => {
                     setCurrentPersona(AgentPersona.SAM);
                     setIsSwitching(false);
                   }, 2000);
-
                 } else if (fc.name === 'startSurvey') {
                   setIsSurveyMode(true);
-                  setTranscripts(prev => [...prev, {
-                    role: 'system',
-                    text: '📝 Routine call complete. Starting survey.',
-                    timestamp: new Date()
-                  }]);
+                  setTranscripts(prev => [...prev, { role: 'system', text: 'Call Complete. Entering Survey Mode.', timestamp: new Date() }]);
                 }
-
-                // Send response back to acknowledge tool execution
-                sessionPromise.then(sess => {
-                  sess.sendToolResponse({
-                    functionResponses: {
-                      id: fc.id,
-                      name: fc.name,
-                      response: { result: "ok" }
-                    }
-                  });
-                });
+                sessionPromise.then(sess => sess.sendToolResponse({ functionResponses: { id: fc.id, name: fc.name, response: { result: "ok" } } }));
               }
             }
 
-            // Handle Transcripts (for UI log)
-            if (message.serverContent?.inputTranscription) {
+            if (message.serverContent?.inputTranscription?.text) {
                const text = message.serverContent.inputTranscription.text;
-               if (text) {
-                 setTranscripts(prev => {
-                   const last = prev[prev.length - 1];
-                   if (last && last.role === 'user') {
-                     return [...prev.slice(0, -1), { ...last, text: last.text + text }];
-                   }
-                   return [...prev, { role: 'user', text, timestamp: new Date() }];
-                 });
-               }
+               setTranscripts(prev => {
+                 const last = prev[prev.length - 1];
+                 if (last && last.role === 'user') return [...prev.slice(0, -1), { ...last, text: last.text + text }];
+                 return [...prev, { role: 'user', text, timestamp: new Date() }];
+               });
             }
 
-            // Handle Audio Output
             const base64Audio = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
             if (base64Audio && outputAudioContextRef.current) {
               const ctx = outputAudioContextRef.current;
               nextStartTime.current = Math.max(nextStartTime.current, ctx.currentTime);
-              
-              const audioBuffer = await decodeAudioData(
-                decodeAudio(base64Audio),
-                ctx,
-                24000,
-                1
-              );
-              
+              const audioBuffer = await decodeAudioData(decodeAudio(base64Audio), ctx, 24000, 1);
               const source = ctx.createBufferSource();
               source.buffer = audioBuffer;
               source.connect(outputNode);
-              
-              source.addEventListener('ended', () => {
-                sourcesRef.current.delete(source);
-              });
-              
+              source.addEventListener('ended', () => sourcesRef.current.delete(source));
               source.start(nextStartTime.current);
               nextStartTime.current += audioBuffer.duration;
               sourcesRef.current.add(source);
             }
             
-            // Handle Interruption
             if (message.serverContent?.interrupted) {
               sourcesRef.current.forEach(s => s.stop());
               sourcesRef.current.clear();
               nextStartTime.current = 0;
             }
           },
-          onclose: () => {
-            console.log("Session Closed");
-            setIsConnected(false);
-          },
+          onclose: () => setIsConnected(false),
           onerror: (err) => {
-            console.error("Session Error", err);
-            setErrorMsg("Connection error. Please try again.");
+            console.error(err);
+            setErrorMsg("Connection lost. Please reconnect.");
             disconnect();
           }
         }
       });
-      
       sessionRef.current = session;
-
     } catch (e) {
       console.error(e);
-      setErrorMsg("Failed to access microphone or connect to AI.");
+      setErrorMsg("Microphone access required.");
       disconnect();
     }
   };
 
-  const handleToggleCall = () => {
-    if (isConnected) {
-      disconnect();
-    } else {
-      connect();
-    }
-  };
-
-  // --- Render Helpers ---
+  const handleToggleCall = () => (isConnected ? disconnect() : connect());
+  
   const isChloe = currentPersona === AgentPersona.CHLOE;
-  // Determine styles based on Persona OR Switching state
-  const themeColor = isChloe ? 'green' : 'red';
-  const bgColor = isChloe ? 'bg-emerald-50' : 'bg-red-50';
-  const borderColor = isChloe ? 'border-emerald-200' : 'border-red-200';
-  const buttonColor = isChloe ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700';
+  
+  // Dynamic Backgrounds
+  const getBackground = () => {
+    if (isSwitching) return 'bg-gradient-to-br from-gray-100 to-gray-300';
+    if (!isConnected) return 'bg-gradient-to-br from-emerald-50 to-teal-100';
+    if (isChloe) return 'bg-gradient-to-br from-emerald-50 to-green-100';
+    return 'bg-gradient-to-br from-red-50 to-orange-100';
+  };
 
   if (!API_KEY) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-red-50 p-4 font-sans">
-        <div className="max-w-lg bg-white p-8 rounded-xl shadow-2xl border border-red-100 text-center">
-          <div className="bg-red-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6">
-            <AlertTriangle className="w-8 h-8 text-red-600" />
-          </div>
-          <h2 className="text-2xl font-bold text-gray-900 mb-3">Configuration Needed</h2>
-          <p className="text-gray-600 mb-6 leading-relaxed">
-            The AI Voice agent cannot start because the API Key is missing.
-          </p>
-          
-          <div className="bg-gray-50 rounded-lg p-6 text-left border border-gray-100">
-            <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wide mb-3">Vercel Deployment Steps:</h3>
-            <ol className="list-decimal list-inside text-sm text-gray-700 space-y-2">
-              <li>Go to your Vercel Project Dashboard.</li>
-              <li>Navigate to <strong>Settings</strong> {'>'} <strong>Environment Variables</strong>.</li>
-              <li>Add a new variable named:</li>
-            </ol>
-            <div className="mt-4 bg-white border border-gray-200 rounded p-3 font-mono text-sm text-blue-600 select-all text-center">
-              VITE_API_KEY
-            </div>
-             <p className="mt-3 text-xs text-gray-500">
-              *Paste your Google Gemini API key as the value. <br/>
-              *Redeploy for changes to take effect.
-            </p>
-          </div>
+      <div className="min-h-screen flex items-center justify-center bg-gray-50 p-6 font-sans">
+        <div className="max-w-md w-full bg-white p-8 rounded-2xl shadow-xl border border-gray-200 text-center">
+          <AlertTriangle className="w-12 h-12 text-amber-500 mx-auto mb-4" />
+          <h2 className="text-xl font-bold text-gray-900">Setup Required</h2>
+          <p className="text-gray-500 mt-2 mb-6">Please add <code className="bg-gray-100 px-2 py-1 rounded text-sm font-mono text-blue-600">VITE_API_KEY</code> to your environment variables.</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className={`min-h-screen ${bgColor} transition-colors duration-700 flex flex-col items-center p-6`}>
+    <div className={`min-h-screen ${getBackground()} transition-all duration-1000 flex flex-col items-center p-4 sm:p-8 font-sans`}>
       
-      {/* Header / Nav */}
-      <header className="w-full max-w-md flex items-center justify-between mb-8">
-        <div className="flex items-center space-x-2">
-          <Leaf className={`w-6 h-6 ${isChloe ? 'text-emerald-600' : 'text-gray-400'}`} />
-          <h1 className="text-xl font-bold text-gray-800">Green Choice</h1>
+      {/* Navbar */}
+      <nav className="w-full max-w-2xl flex items-center justify-between mb-8 p-4 bg-white/60 backdrop-blur-md rounded-2xl border border-white/50 shadow-sm">
+        <div className="flex items-center gap-3">
+          <div className="bg-emerald-600 p-2 rounded-lg text-white">
+            <Leaf className="w-5 h-5" />
+          </div>
+          <div>
+            <h1 className="text-lg font-bold text-gray-800 leading-tight">Green Choice</h1>
+            <p className="text-[10px] font-bold text-gray-400 tracking-widest uppercase">Heating & Cooling</p>
+          </div>
         </div>
-        <div className="text-xs font-semibold text-gray-400 uppercase tracking-wider">
-          {isConnected ? 'Live Connection' : 'Offline'}
+        <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold border ${isConnected ? 'bg-green-100 text-green-700 border-green-200' : 'bg-gray-100 text-gray-500 border-gray-200'}`}>
+          <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`} />
+          {isConnected ? 'LIVE' : 'OFFLINE'}
         </div>
-      </header>
+      </nav>
 
-      {/* Main Agent Card */}
-      <div className={`w-full max-w-md bg-white rounded-3xl shadow-xl overflow-hidden border-2 ${borderColor} transition-all duration-500 relative`}>
+      {/* Main Agent Interface */}
+      <div className="w-full max-w-2xl bg-white/80 backdrop-blur-xl rounded-[2.5rem] shadow-2xl overflow-hidden border border-white/50 relative">
         
         {/* Switching Overlay */}
         {isSwitching && (
-          <div className="absolute inset-0 z-50 bg-white/90 backdrop-blur-sm flex flex-col items-center justify-center animate-fade-in">
-             <div className="bg-red-100 p-4 rounded-full mb-4 animate-bounce">
-                <ArrowRightLeft className="w-10 h-10 text-red-600" />
+          <div className="absolute inset-0 z-50 bg-white/95 flex flex-col items-center justify-center animate-in fade-in duration-300">
+             <div className="bg-red-50 p-6 rounded-full mb-4 animate-bounce border-4 border-red-100">
+                <ArrowRightLeft className="w-12 h-12 text-red-600" />
              </div>
-             <h3 className="text-2xl font-bold text-gray-900 mb-1">Transferring...</h3>
-             <p className="text-sm text-gray-500 font-medium">Connecting to Emergency Dispatch</p>
+             <h3 className="text-2xl font-bold text-gray-900 tracking-tight">Rerouting Call...</h3>
+             <p className="text-sm text-gray-500 font-medium mt-2">Connecting to Priority Dispatch</p>
           </div>
         )}
 
-        {/* Agent Persona Visual */}
-        <div className={`relative h-64 w-full flex flex-col items-center justify-center p-6 transition-colors duration-500 ${isChloe ? 'bg-emerald-100' : 'bg-red-100'}`}>
-          <div className="absolute top-4 right-4">
-             {isSurveyMode && <span className="px-2 py-1 bg-white/50 rounded text-xs font-bold text-gray-600">SURVEY MODE</span>}
+        {/* Header / Avatar Section */}
+        <div className={`relative w-full h-80 flex flex-col items-center justify-center transition-colors duration-700 ${isChloe ? 'bg-gradient-to-b from-emerald-50/50' : 'bg-gradient-to-b from-red-50/50'}`}>
+          
+          <div className="absolute top-6 right-6">
+             {isSurveyMode ? (
+               <span className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-100 text-blue-700 rounded-full text-xs font-bold border border-blue-200 shadow-sm">
+                 <CheckCircle2 className="w-3 h-3" /> Survey Mode
+               </span>
+             ) : (
+                <span className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border shadow-sm transition-colors duration-500 ${isChloe ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-red-100 text-red-700 border-red-200'}`}>
+                  {isChloe ? <ThermometerSun className="w-3 h-3" /> : <ShieldAlert className="w-3 h-3" />}
+                  {isChloe ? 'Rebate Specialist' : 'Emergency Dispatch'}
+                </span>
+             )}
           </div>
 
-          {/* Avatar Ring */}
-          <div className={`relative w-32 h-32 rounded-full border-4 ${isChloe ? 'border-white' : 'border-red-500'} shadow-lg mb-4 flex items-center justify-center overflow-hidden bg-white`}>
-            {isConnected && (
-              <div className={`absolute inset-0 ${isChloe ? 'bg-emerald-400' : 'bg-red-500'} opacity-20 animate-audio-pulse`} style={{ animationDuration: `${Math.max(0.5, 2 - volumeLevel * 5)}s` }}></div>
-            )}
-            <img 
-              src={isChloe 
-                ? "https://picsum.photos/id/64/200/200" // Gentle portrait
-                : "https://picsum.photos/id/1005/200/200" // More intense/focused portrait
-              } 
-              alt="Agent" 
-              className="w-full h-full object-cover z-10"
-            />
+          {/* Avatar */}
+          <div className="relative group">
+            <div className={`absolute -inset-1 rounded-full blur opacity-40 transition-colors duration-700 ${isChloe ? 'bg-emerald-400' : 'bg-red-600'}`}></div>
+            <div className={`relative w-40 h-40 rounded-full border-[6px] shadow-2xl overflow-hidden bg-gray-100 transition-colors duration-700 ${isChloe ? 'border-white' : 'border-red-50'}`}>
+              <img 
+                src={isChloe 
+                  ? "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&q=80&w=200&h=200" 
+                  : "https://images.unsplash.com/photo-1542909168-82c3e7fdca5c?auto=format&fit=crop&q=80&w=200&h=200"
+                } 
+                alt="Agent" 
+                className={`w-full h-full object-cover transition-transform duration-700 ${isConnected ? 'scale-110' : 'scale-100 grayscale'}`}
+              />
+              {/* Overlay Flash on talk */}
+              {isConnected && (
+                <div className={`absolute inset-0 opacity-20 transition-colors duration-300 mix-blend-overlay ${isChloe ? 'bg-emerald-500' : 'bg-red-600'}`} 
+                     style={{ opacity: Math.min(0.5, volumeLevel * 2) }} />
+              )}
+            </div>
           </div>
 
-          <h2 className="text-2xl font-bold text-gray-800 transition-all duration-300">
-            {isChloe ? 'Chloe' : 'Sam'}
-          </h2>
-          <p className={`text-sm font-medium ${isChloe ? 'text-emerald-700' : 'text-red-700'}`}>
-            {isChloe ? 'Front Desk & Rebate Specialist' : '⚠️ Emergency Dispatcher'}
-          </p>
+          <div className="mt-6 text-center">
+            <h2 className="text-3xl font-bold text-gray-800 tracking-tight transition-all duration-300">
+              {isChloe ? 'Chloe' : 'Sam'}
+            </h2>
+            <p className={`text-sm font-medium mt-1 transition-colors duration-300 ${isChloe ? 'text-emerald-600' : 'text-red-600'}`}>
+              {isChloe ? 'Front Desk Agent' : 'Emergency Coordinator'}
+            </p>
+          </div>
         </div>
 
-        {/* Visualizer Area */}
-        <div className="bg-gray-50 h-24 flex flex-col items-center justify-center border-b border-gray-100 relative">
-          <Visualizer volume={volumeLevel} persona={currentPersona} isActive={isConnected} />
-          {errorMsg && <p className="text-red-500 text-xs absolute bottom-1">{errorMsg}</p>}
+        {/* Visualizer & Status */}
+        <div className="h-20 bg-white border-t border-b border-gray-100 flex flex-col items-center justify-center relative overflow-hidden">
+           <Visualizer volume={volumeLevel} persona={currentPersona} isActive={isConnected} />
+           {errorMsg && <div className="absolute bottom-1 text-[10px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full">{errorMsg}</div>}
         </div>
 
-        {/* Controls */}
-        <div className="p-6 flex justify-center">
+        {/* Transcript Area */}
+        <div className="h-72 bg-gray-50/50 p-4 overflow-y-auto scroll-smooth">
+          {transcripts.length === 0 ? (
+            <div className="h-full flex flex-col items-center justify-center text-gray-300 space-y-3">
+              <Activity className="w-12 h-12 opacity-20" />
+              <p className="text-sm font-medium">Ready to start conversation</p>
+            </div>
+          ) : (
+            <>
+              {transcripts.map((msg, idx) => (
+                msg.role === 'system' ? (
+                  <div key={idx} className="flex justify-center my-4 animate-in fade-in zoom-in duration-300">
+                    <span className="text-[10px] font-bold text-gray-400 bg-gray-100/80 backdrop-blur-sm px-3 py-1 rounded-full border border-gray-200 shadow-sm uppercase tracking-wide">
+                      {msg.text}
+                    </span>
+                  </div>
+                ) : (
+                  <ChatBubble key={idx} msg={msg} persona={currentPersona} />
+                )
+              ))}
+              <div className="h-4" /> {/* Spacer */}
+            </>
+          )}
+        </div>
+
+        {/* Footer Actions */}
+        <div className="p-6 bg-white border-t border-gray-100 flex items-center justify-center">
           <button
             onClick={handleToggleCall}
-            className={`flex items-center space-x-3 px-8 py-4 rounded-full shadow-lg text-white font-semibold text-lg transition-transform transform active:scale-95 ${isConnected ? 'bg-gray-800 hover:bg-gray-900' : buttonColor}`}
+            className={`
+              relative group overflow-hidden px-10 py-4 rounded-full font-bold text-lg shadow-xl transition-all duration-300 transform hover:-translate-y-0.5 hover:shadow-2xl active:translate-y-0 active:shadow-md
+              ${isConnected 
+                ? 'bg-gray-900 text-white hover:bg-gray-800 ring-4 ring-gray-100' 
+                : `${isChloe ? 'bg-emerald-600 hover:bg-emerald-500 ring-4 ring-emerald-100' : 'bg-red-600 hover:bg-red-500 ring-4 ring-red-100'} text-white`
+              }
+            `}
           >
-            {isConnected ? (
-              <>
-                <PhoneOff className="w-6 h-6" />
-                <span>End Call</span>
-              </>
-            ) : (
-              <>
-                <Phone className="w-6 h-6" />
-                <span>Talk to Us</span>
-              </>
-            )}
+            <div className="relative flex items-center gap-3 z-10">
+              {isConnected ? <PhoneOff className="w-6 h-6" /> : <Phone className="w-6 h-6" />}
+              <span>{isConnected ? 'End Session' : 'Start Call'}</span>
+            </div>
           </button>
         </div>
       </div>
 
-      {/* Transcript Log (Simulating the backend integration or debug view) */}
-      <div className="w-full max-w-md mt-8">
-        <div className="flex items-center space-x-2 mb-4 text-gray-500">
-           <History className="w-4 h-4" />
-           <span className="text-sm font-medium">Live Transcript</span>
-        </div>
-        <div className="bg-white rounded-xl shadow-sm border border-gray-200 p-4 h-64 overflow-y-auto space-y-2">
-          {transcripts.length === 0 && (
-            <div className="text-center text-gray-400 text-sm mt-10">
-              <Activity className="w-8 h-8 mx-auto mb-2 opacity-30" />
-              Call history will appear here.
-            </div>
-          )}
-          {transcripts.map((msg, idx) => (
-             msg.role === 'system' ? (
-                <div key={idx} className="flex justify-center my-2">
-                  <span className="text-xs font-bold text-gray-500 bg-gray-100 px-2 py-1 rounded border border-gray-200">
-                    {msg.text}
-                  </span>
-                </div>
-             ) : (
-                <TranscriptMessage key={idx} msg={msg} />
-             )
-          ))}
-        </div>
-      </div>
-
-      <div className="mt-8 text-center max-w-xs text-gray-400 text-xs">
-        <p>Green Choice Heating & Cooling © 2026.</p>
-        <p className="mt-1">Powered by Gemini Multimodal Live API.</p>
-      </div>
-
+      <footer className="mt-8 text-center">
+        <p className="text-xs font-semibold text-gray-400">Green Choice Heating & Cooling © 2026</p>
+        <p className="text-[10px] text-gray-300 mt-1">Powered by Google Gemini Multimodal Live API</p>
+      </footer>
     </div>
   );
 }
