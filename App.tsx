@@ -4,7 +4,27 @@ import { AgentPersona, MessageLog, BlobData } from './types';
 import { Mic, MicOff, Phone, PhoneOff, AlertTriangle, Leaf, History, Activity, Radio, ArrowRightLeft } from 'lucide-react';
 
 // --- Constants & Config ---
-const API_KEY = process.env.API_KEY || ''; // Injected by environment
+
+// Safe API Key retrieval for Vite/Vercel environments to prevent "process is not defined" crashes
+const getApiKey = (): string => {
+  try {
+    // Check for Vite-specific env var first (standard for Vercel + Vite)
+    // @ts-ignore
+    if (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_API_KEY) {
+      // @ts-ignore
+      return import.meta.env.VITE_API_KEY;
+    }
+    // Check for standard process.env (fallback)
+    if (typeof process !== 'undefined' && process.env && process.env.API_KEY) {
+      return process.env.API_KEY;
+    }
+  } catch (e) {
+    console.warn("Error reading environment variables", e);
+  }
+  return '';
+};
+
+const API_KEY = getApiKey();
 const MODEL_NAME = 'gemini-2.5-flash-native-audio-preview-09-2025';
 
 // --- System Instructions ---
@@ -249,6 +269,10 @@ export default function App() {
   const connect = async () => {
     setErrorMsg(null);
     try {
+      if (!API_KEY) {
+        throw new Error("API Key not found");
+      }
+
       // 1. Initialize Audio Contexts
       const InputContextClass = (window.AudioContext || (window as any).webkitAudioContext);
       const inputCtx = new InputContextClass({ sampleRate: 16000 });
@@ -449,6 +473,38 @@ export default function App() {
   const bgColor = isChloe ? 'bg-emerald-50' : 'bg-red-50';
   const borderColor = isChloe ? 'border-emerald-200' : 'border-red-200';
   const buttonColor = isChloe ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-red-600 hover:bg-red-700';
+
+  if (!API_KEY) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-red-50 p-4 font-sans">
+        <div className="max-w-lg bg-white p-8 rounded-xl shadow-2xl border border-red-100 text-center">
+          <div className="bg-red-100 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-6">
+            <AlertTriangle className="w-8 h-8 text-red-600" />
+          </div>
+          <h2 className="text-2xl font-bold text-gray-900 mb-3">Configuration Needed</h2>
+          <p className="text-gray-600 mb-6 leading-relaxed">
+            The AI Voice agent cannot start because the API Key is missing.
+          </p>
+          
+          <div className="bg-gray-50 rounded-lg p-6 text-left border border-gray-100">
+            <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wide mb-3">Vercel Deployment Steps:</h3>
+            <ol className="list-decimal list-inside text-sm text-gray-700 space-y-2">
+              <li>Go to your Vercel Project Dashboard.</li>
+              <li>Navigate to <strong>Settings</strong> {'>'} <strong>Environment Variables</strong>.</li>
+              <li>Add a new variable named:</li>
+            </ol>
+            <div className="mt-4 bg-white border border-gray-200 rounded p-3 font-mono text-sm text-blue-600 select-all text-center">
+              VITE_API_KEY
+            </div>
+             <p className="mt-3 text-xs text-gray-500">
+              *Paste your Google Gemini API key as the value. <br/>
+              *Redeploy for changes to take effect.
+            </p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={`min-h-screen ${bgColor} transition-colors duration-700 flex flex-col items-center p-6`}>
