@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality, Type, FunctionDeclaration } from "@google/genai";
 import { AgentPersona, MessageLog, BlobData } from './types';
-import { Phone, PhoneOff, AlertTriangle, Leaf, History, Activity, ArrowRightLeft, ThermometerSun, ShieldAlert, CheckCircle2 } from 'lucide-react';
+import { Phone, PhoneOff, AlertTriangle, Leaf, Activity, ArrowRightLeft, ThermometerSun, ShieldAlert, CheckCircle2 } from 'lucide-react';
 
 // --- Constants & Config ---
 
@@ -350,18 +350,6 @@ export default function App() {
     if (isChloe) return 'bg-gradient-to-br from-emerald-50 to-green-100';
     return 'bg-gradient-to-br from-red-50 to-orange-100';
   };
-
-  if (!API_KEY) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-gray-50 p-6 font-sans">
-        <div className="max-w-md w-full bg-white p-8 rounded-2xl shadow-xl border border-gray-200 text-center">
-          <AlertTriangle className="w-12 h-12 text-amber-500 mx-auto mb-4" />
-          <h2 className="text-xl font-bold text-gray-900">Setup Required</h2>
-          <p className="text-gray-500 mt-2 mb-6">Please add <code className="bg-gray-100 px-2 py-1 rounded text-sm font-mono text-blue-600">VITE_API_KEY</code> to your environment variables.</p>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className={`min-h-screen ${getBackground()} transition-all duration-1000 flex flex-col items-center p-4 sm:p-8 font-sans`}>
