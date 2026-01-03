@@ -6,7 +6,7 @@ import {
   ArrowRightLeft, ThermometerSun, ShieldAlert, 
   MapPin, Signal, Radio, 
   Zap, Clock, Globe, ShieldCheck, Sparkles, 
-  Volume2
+  Volume2, Download, FileText
 } from 'lucide-react';
 
 const API_KEY = (process.env.API_KEY || '');
@@ -19,6 +19,10 @@ PERSONA 2: SAM (Emergency). Tone: Tactical, authoritative, lightning-fast.
 
 Detection Protocol: If you hear "water leaking", "cold house", "no heat", "sparks", or "scary noise", transfer to Sam immediately.
 GTA Context: Mention "East York", "Scarborough", or "North York" naturally if appropriate.
+
+Capabilities: 
+- You can trigger a handoff to Sam if an emergency is detected.
+- You can download the current transcript if the user asks to "save the conversation", "download transcript", or "export our chat".
 `;
 
 const switchToSamTool: FunctionDeclaration = {
@@ -39,7 +43,16 @@ const startSurveyTool: FunctionDeclaration = {
   },
 };
 
-const tools = [{ functionDeclarations: [switchToSamTool, startSurveyTool] }];
+const downloadTranscriptTool: FunctionDeclaration = {
+  name: 'downloadTranscript',
+  parameters: {
+    type: Type.OBJECT,
+    description: 'Triggers the download of the conversation transcript file for the user.',
+    properties: {},
+  },
+};
+
+const tools = [{ functionDeclarations: [switchToSamTool, startSurveyTool, downloadTranscriptTool] }];
 
 // --- Sound Synthesizer ---
 function playHandoffChime(ctx: AudioContext) {
@@ -182,6 +195,12 @@ export default function App() {
   const sessionRef = useRef<any>(null);
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
 
+  // Ref to transcripts for access inside the session promise
+  const transcriptsRef = useRef<MessageLog[]>([]);
+  useEffect(() => {
+    transcriptsRef.current = transcripts;
+  }, [transcripts]);
+
   const disconnect = useCallback(() => {
     sessionRef.current = null;
     if (audioContexts.current.input) audioContexts.current.input.close();
@@ -189,6 +208,26 @@ export default function App() {
     sourcesRef.current.forEach(s => { try { s.stop(); } catch(e) {} });
     setIsConnected(false);
     setVolumeLevel(0);
+  }, []);
+
+  const downloadTranscript = useCallback(() => {
+    const logs = transcriptsRef.current;
+    if (logs.length === 0) return;
+    const content = logs
+      .map(t => {
+        const time = t.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        const label = t.role === 'user' ? 'USER' : (t.role === 'system' ? 'SYSTEM' : 'MODEL');
+        return `[${time}] ${label}: ${t.text}`;
+      })
+      .join('\n\n');
+
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `GreenChoice_Transcript_${new Date().getTime()}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
   }, []);
 
   const connect = async () => {
@@ -199,13 +238,14 @@ export default function App() {
       audioContexts.current = { input: inputCtx, output: outputCtx };
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const session = await ai.live.connect({
+      const sessionPromise = ai.live.connect({
         model: MODEL_NAME,
         config: {
           responseModalities: [Modality.AUDIO],
           systemInstruction: SYSTEM_INSTRUCTION,
           tools: tools,
-          inputAudioTranscription: {}, // Fixed: Must be empty object to enable transcription
+          inputAudioTranscription: {}, 
+          outputAudioTranscription: {}, 
         },
         callbacks: {
           onopen: () => {
@@ -218,7 +258,7 @@ export default function App() {
               let sum = 0;
               for(let i=0; i<inputData.length; i++) sum += inputData[i] * inputData[i];
               setVolumeLevel(prev => Math.max(Math.sqrt(sum / inputData.length) * 5, prev * 0.9));
-              session.sendRealtimeInput({ media: createBlob(inputData) });
+              sessionPromise.then(s => s.sendRealtimeInput({ media: createBlob(inputData) }));
             };
             source.connect(processor);
             processor.connect(inputCtx.destination);
@@ -238,14 +278,30 @@ export default function App() {
                     setCurrentPersona(AgentPersona.SAM);
                     setIsSwitching(false);
                   }, 2200);
+                } else if (fc.name === 'downloadTranscript') {
+                  downloadTranscript();
+                  setTranscripts(prev => [...prev, { role: 'system', text: 'TRANSCRIPT DOWNLOAD TRIGGERED VIA VOICE COMMAND', timestamp: new Date() }]);
                 }
-                session.sendToolResponse({ functionResponses: { id: fc.id, name: fc.name, response: { result: "ok" } } });
+                sessionPromise.then(s => s.sendToolResponse({ functionResponses: { id: fc.id, name: fc.name, response: { result: "ok" } } }));
               }
             }
+            // Capture User Transcription
             if (msg.serverContent?.inputTranscription?.text) {
               const text = msg.serverContent.inputTranscription.text;
               setTranscripts(prev => [...prev, { role: 'user', text, timestamp: new Date() }]);
             }
+            // Capture Model Transcription
+            if (msg.serverContent?.outputTranscription?.text) {
+              const text = msg.serverContent.outputTranscription.text;
+              setTranscripts(prev => {
+                const last = prev[prev.length - 1];
+                if (last && last.role === 'model') {
+                   return [...prev.slice(0, -1), { ...last, text: last.text + text }];
+                }
+                return [...prev, { role: 'model', text, timestamp: new Date() }];
+              });
+            }
+
             const audioData = msg.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
             if (audioData && outputCtx) {
               nextStartTime.current = Math.max(nextStartTime.current, outputCtx.currentTime);
@@ -262,7 +318,7 @@ export default function App() {
           onerror: (err) => { console.error(err); disconnect(); }
         }
       });
-      sessionRef.current = session;
+      sessionRef.current = sessionPromise;
     } catch (e) { console.error(e); }
   };
 
@@ -389,11 +445,15 @@ export default function App() {
         <div className="lg:col-span-3">
           <div className="glass-container rounded-[3rem] h-[640px] flex flex-col overflow-hidden shadow-2xl">
             <div className="p-8 border-b border-slate-100/50 bg-white/40 flex items-center justify-between">
-               <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest">Live Metadata</h3>
-               <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 text-blue-600 text-[10px] font-black">
-                 <Signal className="w-3 h-3" />
-                 ECHO SYNC
-               </div>
+               <h3 className="text-xs font-black text-slate-500 uppercase tracking-widest">Live Feed</h3>
+               <button 
+                onClick={downloadTranscript}
+                disabled={transcripts.length === 0}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-slate-900 text-white text-[10px] font-black hover:bg-slate-800 transition-colors disabled:opacity-30 disabled:cursor-not-allowed group"
+               >
+                 <Download className="w-3 h-3 group-hover:translate-y-0.5 transition-transform" />
+                 EXPORT
+               </button>
             </div>
             
             <div className="flex-1 overflow-y-auto p-8 space-y-8 scrollbar-hide">
@@ -406,14 +466,14 @@ export default function App() {
                  transcripts.map((t, i) => (
                    <div key={i} className={`animate-in slide-in-from-bottom-4 duration-700 ${t.role === 'system' ? 'opacity-100' : ''}`}>
                       <div className="flex items-center justify-between mb-3">
-                        <span className={`text-[10px] font-black ${t.role === 'system' ? 'text-red-600' : (isChloe ? 'text-emerald-600' : 'text-rose-600')} uppercase tracking-widest transition-colors`}>
-                          {t.role === 'system' ? 'SYSTEM OVERRIDE' : 'External Source'}
+                        <span className={`text-[10px] font-black ${t.role === 'system' ? 'text-red-600' : (t.role === 'model' ? 'text-blue-600' : (isChloe ? 'text-emerald-600' : 'text-rose-600'))} uppercase tracking-widest transition-colors`}>
+                          {t.role === 'system' ? 'SYSTEM OVERRIDE' : (t.role === 'model' ? 'GREEN CHOICE AI' : 'EXTERNAL SOURCE')}
                         </span>
                         <span className="text-[9px] font-bold text-slate-400 bg-white px-2 py-0.5 rounded-md shadow-sm">{t.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                       </div>
-                      <div className={`text-sm font-bold leading-relaxed p-5 rounded-[2rem] shadow-sm border relative transition-all duration-500 ${t.role === 'system' ? 'bg-red-50 text-red-700 border-red-200 animate-pulse' : 'bg-white/80 text-slate-700 border-slate-50'}`}>
+                      <div className={`text-sm font-bold leading-relaxed p-5 rounded-[2rem] shadow-sm border relative transition-all duration-500 ${t.role === 'system' ? 'bg-red-50 text-red-700 border-red-200 animate-pulse' : (t.role === 'model' ? 'bg-blue-50/50 text-blue-900 border-blue-100' : 'bg-white/80 text-slate-700 border-slate-50')}`}>
                         {t.text}
-                        <div className={`absolute top-4 -left-1 w-1.5 h-6 rounded-full ${t.role === 'system' ? 'bg-red-600' : (isChloe ? 'bg-emerald-400' : 'bg-rose-400')}`} />
+                        <div className={`absolute top-4 -left-1 w-1.5 h-6 rounded-full ${t.role === 'system' ? 'bg-red-600' : (t.role === 'model' ? 'bg-blue-500' : (isChloe ? 'bg-emerald-400' : 'bg-rose-400'))}`} />
                       </div>
                    </div>
                  ))
