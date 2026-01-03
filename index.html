@@ -3,45 +3,72 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Green Choice | AI Dispatch Control</title>
+    <title>Green Choice | AI Voice Dispatch</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
       :root {
-        --chloe-glow: 0 0 40px rgba(16, 185, 129, 0.3);
-        --sam-glow: 0 0 40px rgba(239, 68, 68, 0.3);
+        --chloe-primary: #10b981;
+        --chloe-secondary: #06b6d4;
+        --sam-primary: #ef4444;
+        --sam-secondary: #f97316;
       }
       body {
         font-family: 'Plus Jakarta Sans', sans-serif;
-        background-color: #030712;
-        color: #f9fafb;
         margin: 0;
         overflow-x: hidden;
+        transition: background-color 1s ease;
       }
-      .glass-card {
-        background: rgba(17, 24, 39, 0.7);
-        backdrop-filter: blur(20px);
-        border: 1px solid rgba(255, 255, 255, 0.1);
-        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
-      }
-      .chloe-active { border-color: rgba(16, 185, 129, 0.4); box-shadow: var(--chloe-glow); }
-      .sam-active { border-color: rgba(239, 68, 68, 0.4); box-shadow: var(--sam-glow); }
-      
-      @keyframes scanline {
-        0% { transform: translateY(-100%); }
-        100% { transform: translateY(100%); }
-      }
-      .scanline-effect {
-        position: absolute;
+      .mesh-gradient {
+        position: fixed;
+        top: 0;
+        left: 0;
         width: 100%;
         height: 100%;
-        background: linear-gradient(to bottom, transparent 0%, rgba(239, 68, 68, 0.05) 50%, transparent 100%);
-        animation: scanline 4s linear infinite;
-        pointer-events: none;
+        z-index: -1;
+        filter: blur(100px);
+        opacity: 0.5;
+        transition: all 1s ease;
       }
-      
-      .audio-ring {
-        transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+      .mesh-blob {
+        position: absolute;
+        width: 600px;
+        height: 600px;
+        border-radius: 50%;
+        filter: blur(80px);
+        animation: float 20s infinite alternate ease-in-out;
+      }
+      @keyframes float {
+        0% { transform: translate(0, 0) scale(1); }
+        33% { transform: translate(10vw, 20vh) scale(1.1); }
+        66% { transform: translate(-5vw, 15vh) scale(0.9); }
+        100% { transform: translate(5vw, -10vh) scale(1); }
+      }
+      .glass-container {
+        background: rgba(255, 255, 255, 0.4);
+        backdrop-filter: blur(40px) saturate(180%);
+        border: 1px solid rgba(255, 255, 255, 0.5);
+        box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.07);
+      }
+      .agent-glow-chloe {
+        box-shadow: 0 0 80px -10px rgba(16, 185, 129, 0.4);
+        border-color: rgba(16, 185, 129, 0.3);
+      }
+      .agent-glow-sam {
+        box-shadow: 0 0 80px -10px rgba(239, 68, 68, 0.4);
+        border-color: rgba(239, 68, 68, 0.3);
+      }
+      .audio-bar {
+        transition: height 0.1s cubic-bezier(0.17, 0.67, 0.83, 0.67);
+      }
+      .shimmer {
+        background: linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent);
+        background-size: 200% 100%;
+        animation: shimmer 2s infinite;
+      }
+      @keyframes shimmer {
+        0% { background-position: -200% 0; }
+        100% { background-position: 200% 0; }
       }
     </style>
   <script type="importmap">
@@ -56,7 +83,7 @@
 }
 </script>
 </head>
-  <body>
+  <body class="bg-slate-50">
     <div id="root"></div>
     <script type="module" src="./index.tsx"></script>
   </body>
