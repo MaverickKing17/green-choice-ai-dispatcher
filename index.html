@@ -3,22 +3,45 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Green Choice Heating & Cooling</title>
+    <title>Green Choice | AI Dispatch Control</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <style>
+      :root {
+        --chloe-glow: 0 0 40px rgba(16, 185, 129, 0.3);
+        --sam-glow: 0 0 40px rgba(239, 68, 68, 0.3);
+      }
       body {
-        font-family: 'Inter', sans-serif;
-        background-color: #f3f4f6;
+        font-family: 'Plus Jakarta Sans', sans-serif;
+        background-color: #030712;
+        color: #f9fafb;
+        margin: 0;
+        overflow-x: hidden;
       }
-      /* Custom pulse animation for talking state */
-      @keyframes audio-pulse {
-        0% { transform: scale(1); opacity: 1; }
-        50% { transform: scale(1.1); opacity: 0.8; }
-        100% { transform: scale(1); opacity: 1; }
+      .glass-card {
+        background: rgba(17, 24, 39, 0.7);
+        backdrop-filter: blur(20px);
+        border: 1px solid rgba(255, 255, 255, 0.1);
+        box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
       }
-      .animate-audio-pulse {
-        animation: audio-pulse 1.5s infinite ease-in-out;
+      .chloe-active { border-color: rgba(16, 185, 129, 0.4); box-shadow: var(--chloe-glow); }
+      .sam-active { border-color: rgba(239, 68, 68, 0.4); box-shadow: var(--sam-glow); }
+      
+      @keyframes scanline {
+        0% { transform: translateY(-100%); }
+        100% { transform: translateY(100%); }
+      }
+      .scanline-effect {
+        position: absolute;
+        width: 100%;
+        height: 100%;
+        background: linear-gradient(to bottom, transparent 0%, rgba(239, 68, 68, 0.05) 50%, transparent 100%);
+        animation: scanline 4s linear infinite;
+        pointer-events: none;
+      }
+      
+      .audio-ring {
+        transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
       }
     </style>
   <script type="importmap">

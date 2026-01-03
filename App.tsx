@@ -1,11 +1,14 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality, Type, FunctionDeclaration } from "@google/genai";
 import { AgentPersona, MessageLog, BlobData } from './types';
-import { Phone, PhoneOff, AlertTriangle, Leaf, Activity, ArrowRightLeft, ThermometerSun, ShieldAlert, CheckCircle2 } from 'lucide-react';
+import { 
+  Phone, PhoneOff, Leaf, Activity, 
+  ArrowRightLeft, ThermometerSun, ShieldAlert, 
+  CheckCircle2, MapPin, Signal, Radio, 
+  ChevronRight, AlertCircle, Zap
+} from 'lucide-react';
 
 // --- Constants & Config ---
-
-// Safe API Key retrieval
 const getApiKey = (): string => {
   try {
     // @ts-ignore
@@ -25,62 +28,30 @@ const getApiKey = (): string => {
 const API_KEY = getApiKey();
 const MODEL_NAME = 'gemini-2.5-flash-native-audio-preview-09-2025';
 
-// --- System Instructions ---
 const SYSTEM_INSTRUCTION = `
 You are the Voice AI system for 'Green Choice Heating & Cooling' in East York.
-You have two distinct personas. You start as CHLOE.
+PERSONA 1: CHLOE (Lead Gen & Rebates). Tone: Polished, warm, persuasive.
+PERSONA 2: SAM (Emergency). Tone: Tactical, authoritative, lightning-fast.
 
-PERSONA 1: CHLOE (Front-Desk & Rebate Specialist)
-- Tone: Warm, energetic, and professional.
-- Role: Lead qualification and rebate explanation.
-- SUBTLE URGENCY DETECTION (CRITICAL UPGRADE):
-  As Chloe, you must continuously monitor the audio stream for signs of escalating distress or property risk that Sam should handle.
-  Transfer to Sam IMMEDIATELY via 'switchToSam' if you detect:
-  1. ADJECTIVE MARKERS: "Scary sound," "unbearable cold," "burning smell," "sparking," "hissing," "flooding."
-  2. EMOTIONAL MARKERS: The customer sounds panicked, hyperventilating, crying, or abnormally stressed.
-  3. VULNERABILITY MARKERS: "I have a newborn," "My 90-year-old father is here and it's 10 degrees," "I'm scared to touch the unit."
-  4. INTERRUPT THE SCRIPT: If they sound distressed, stop the rebate talk immediately. Say: "I'm hearing that this is a stressful situation and I want to make sure you're safe. Let me connect you to Sam, our emergency coordinator, right now."
-
-- ROUTINE PROTOCOL (If no urgency detected):
-  1. Greet: "Thanks for calling Green Choice! Are you looking for a repair or information on the 2026 heat pump rebates?"
-  2. Ask: "To get you the right numbers, what specifically heats your home right now? Is it natural gas, electricity, oil, or propane?"
-  3. Lead Qualification: IF Electric/Oil/Propane, ask: "To ensure we quote the right rebate tier, is your current system a central furnace, a boiler, or baseboard heaters?"
-  4. Logic: 
-     - Non-Gas: $1,250-$2,000/ton. Max $7.5k-$12k.
-     - Gas/Rentals: $500/ton. Max $2k-$3k.
-  5. Close: Book assessment.
-
-PERSONA 2: SAM (Emergency Dispatcher)
-- Tone: Serious, rapid, authoritative, and reassuring.
-- Role: Immediate safety and technician dispatch.
-- PROTOCOL:
-  1. IF "Gas Smell": "Hang up, leave, call 911."
-  2. FOR ALL TRANSFERS FROM CHLOE: "Sam here. I've got your priority alert. Chloe mentioned things are getting urgent—I'm moving you to the top of our queue. What is your address so I can get a truck headed your way?"
-  3. Respond guarantee: 4-hour window.
-
-LOGIC FLOW:
-1. Initial state: CHLOE.
-2. Monitor for: Distress, panic, safety risks, or explicit emergency keywords.
-3. ACTION: Call 'switchToSam' if ANY risk or high distress is detected. Do not wait for a full sentence.
-4. ACTION: Call 'startSurvey' when call ends naturally.
+Detection Protocol: If you hear "water leaking", "cold house", "no heat", "sparks", or "scary noise", transfer to Sam immediately.
+GTA Context: Mention "East York", "Scarborough", or "North York" naturally if appropriate.
 `;
 
-// --- Tool Definitions ---
 const switchToSamTool: FunctionDeclaration = {
   name: 'switchToSam',
-  description: 'Triggers the persona switch to Sam when distress or emergency is detected.',
+  description: 'Persona handoff to emergency mode.',
   parameters: { type: Type.OBJECT, properties: {} },
 };
 
 const startSurveyTool: FunctionDeclaration = {
   name: 'startSurvey',
-  description: 'Triggers the satisfaction survey mode after a call is wrapped up.',
+  description: 'Wrap up call.',
   parameters: { type: Type.OBJECT, properties: {} },
 };
 
 const tools = [{ functionDeclarations: [switchToSamTool, startSurveyTool] }];
 
-// --- Audio Helpers ---
+// --- Helpers ---
 function createBlob(data: Float32Array): BlobData {
   const l = data.length;
   const int16 = new Int16Array(l);
@@ -96,11 +67,8 @@ function createBlob(data: Float32Array): BlobData {
 
 function decodeAudio(base64: string): Uint8Array {
   const binaryString = atob(base64);
-  const len = binaryString.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
-  }
+  const bytes = new Uint8Array(binaryString.length);
+  for (let i = 0; i < binaryString.length; i++) bytes[i] = binaryString.charCodeAt(i);
   return bytes;
 }
 
@@ -117,73 +85,67 @@ async function decodeAudioData(data: Uint8Array, ctx: AudioContext, sampleRate: 
   return buffer;
 }
 
-function playHandoffSound(ctx: AudioContext) {
-  const osc = ctx.createOscillator();
-  const gain = ctx.createGain();
-  osc.connect(gain);
-  gain.connect(ctx.destination);
-  const now = ctx.currentTime;
-  osc.type = 'sawtooth';
-  osc.frequency.setValueAtTime(440, now);
-  osc.frequency.linearRampToValueAtTime(880, now + 0.1);
-  osc.frequency.setValueAtTime(880, now + 0.2);
-  osc.frequency.exponentialRampToValueAtTime(1760, now + 0.4);
-  gain.gain.setValueAtTime(0.05, now);
-  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
-  osc.start(now);
-  osc.stop(now + 0.5);
-}
+// --- Sub-Components ---
 
-// --- Components ---
-
-const Visualizer: React.FC<{ volume: number; persona: AgentPersona; isActive: boolean }> = ({ volume, persona, isActive }) => {
-  const bars = 12;
+const AudioAura: React.FC<{ volume: number; persona: AgentPersona; isActive: boolean }> = ({ volume, persona, isActive }) => {
   const isChloe = persona === AgentPersona.CHLOE;
-  
+  const color = isChloe ? 'from-emerald-400 to-cyan-500' : 'from-red-500 to-orange-600';
+  const scale = 1 + (volume * 1.5);
+
   return (
-    <div className="flex items-center justify-center space-x-1.5 h-16 w-full px-8">
-      {isActive ? Array.from({ length: bars }).map((_, i) => {
-        const wave = Math.sin(i * 0.5 + Date.now() / 100) * 0.5 + 0.5;
-        const height = Math.max(15, Math.min(100, volume * (150 + i * 10) * wave + 20)); 
-        const colorClass = isChloe ? 'bg-emerald-400' : 'bg-red-500';
-        
-        return (
+    <div className="relative flex items-center justify-center w-64 h-64">
+      {/* Outer Glow Rings */}
+      <div 
+        className={`absolute inset-0 rounded-full bg-gradient-to-tr ${color} opacity-10 blur-2xl transition-all duration-300`}
+        style={{ transform: `scale(${scale * 1.2})` }}
+      />
+      <div 
+        className={`absolute inset-4 rounded-full border-2 border-white/10 audio-ring transition-all duration-300`}
+        style={{ transform: `scale(${scale * 1.1})` }}
+      />
+      
+      {/* Active Frequency Bars (Circular) */}
+      <div className="absolute inset-0 flex items-center justify-center">
+        {Array.from({ length: 24 }).map((_, i) => (
           <div
             key={i}
-            className={`w-2 rounded-full transition-all duration-75 ${colorClass} shadow-[0_0_10px_rgba(0,0,0,0.1)]`}
-            style={{ height: `${height}%` }}
+            className={`absolute w-1 rounded-full bg-gradient-to-t ${color} transition-all duration-75`}
+            style={{
+              height: isActive ? `${Math.max(10, volume * 100 * (0.5 + Math.random()))}%` : '4px',
+              transform: `rotate(${i * 15}deg) translateY(-85px)`,
+              opacity: isActive ? 0.8 : 0.2
+            }}
           />
-        );
-      }) : (
-        <div className="flex items-center space-x-2 text-gray-400 animate-pulse">
-           <div className="w-2 h-2 bg-gray-300 rounded-full"></div>
-           <div className="w-2 h-2 bg-gray-300 rounded-full animation-delay-200"></div>
-           <div className="w-2 h-2 bg-gray-300 rounded-full animation-delay-400"></div>
-        </div>
-      )}
-    </div>
-  );
-};
+        ))}
+      </div>
 
-const ChatBubble: React.FC<{ msg: MessageLog; persona: AgentPersona }> = ({ msg, persona }) => {
-  const isUser = msg.role === 'user';
-  const isChloe = persona === AgentPersona.CHLOE;
-  const agentColor = isChloe ? 'bg-emerald-50 text-emerald-900 border-emerald-100' : 'bg-red-50 text-red-900 border-red-100';
-
-  return (
-    <div className={`flex w-full ${isUser ? 'justify-end' : 'justify-start'} mb-4 animate-in fade-in slide-in-from-bottom-2 duration-300`}>
-      <div className={`max-w-[85%] rounded-2xl px-5 py-3 text-sm font-medium shadow-sm ${
-        isUser 
-          ? 'bg-gray-800 text-white rounded-br-none' 
-          : `${agentColor} border rounded-bl-none`
-      }`}>
-        {msg.text}
+      {/* Center Image Container */}
+      <div className={`relative w-40 h-40 rounded-full border-4 ${isChloe ? 'border-emerald-500/50' : 'border-red-500/50'} overflow-hidden shadow-2xl bg-gray-900`}>
+        <img 
+          src={isChloe 
+            ? "https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&q=80&w=300&h=300" 
+            : "https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=300&h=300"
+          } 
+          className={`w-full h-full object-cover transition-all duration-700 ${isActive ? 'scale-105' : 'scale-100 grayscale'}`}
+          alt="Agent"
+        />
+        {!isActive && <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" />}
       </div>
     </div>
   );
 };
 
-// --- Main App ---
+const StatusMetric: React.FC<{ icon: any; label: string; value: string; color: string }> = ({ icon: Icon, label, value, color }) => (
+  <div className="flex flex-col gap-1 p-3 rounded-xl bg-white/5 border border-white/10">
+    <div className="flex items-center gap-2 text-[10px] font-bold text-gray-400 uppercase tracking-tighter">
+      <Icon className={`w-3 h-3 ${color}`} />
+      {label}
+    </div>
+    <div className="text-sm font-bold text-gray-200">{value}</div>
+  </div>
+);
+
+// --- Main Application ---
 
 export default function App() {
   const [isConnected, setIsConnected] = useState(false);
@@ -192,51 +154,29 @@ export default function App() {
   const [volumeLevel, setVolumeLevel] = useState(0);
   const [transcripts, setTranscripts] = useState<MessageLog[]>([]);
   const [isSurveyMode, setIsSurveyMode] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const nextStartTime = useRef<number>(0);
-  const inputAudioContextRef = useRef<AudioContext | null>(null);
-  const outputAudioContextRef = useRef<AudioContext | null>(null);
-  const inputSourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
-  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  const audioContexts = useRef<{ input: AudioContext | null; output: AudioContext | null }>({ input: null, output: null });
   const sessionRef = useRef<any>(null);
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
 
-  useEffect(() => {
-    return () => disconnect();
-  }, []);
-
   const disconnect = useCallback(() => {
     sessionRef.current = null;
-    if (inputAudioContextRef.current) inputAudioContextRef.current.close();
-    if (outputAudioContextRef.current) outputAudioContextRef.current.close();
-    if (processorRef.current) processorRef.current.disconnect();
-    if (inputSourceRef.current) inputSourceRef.current.disconnect();
-    sourcesRef.current.forEach(source => { try { source.stop(); } catch(e) {} });
-    sourcesRef.current.clear();
+    if (audioContexts.current.input) audioContexts.current.input.close();
+    if (audioContexts.current.output) audioContexts.current.output.close();
+    sourcesRef.current.forEach(s => { try { s.stop(); } catch(e) {} });
     setIsConnected(false);
     setVolumeLevel(0);
-    setIsSwitching(false);
   }, []);
 
   const connect = async () => {
-    setErrorMsg(null);
     try {
       const ai = new GoogleGenAI({ apiKey: API_KEY });
-      
-      const InputContextClass = (window.AudioContext || (window as any).webkitAudioContext);
-      const inputCtx = new InputContextClass({ sampleRate: 16000 });
-      const outputCtx = new InputContextClass({ sampleRate: 24000 });
-      inputAudioContextRef.current = inputCtx;
-      outputAudioContextRef.current = outputCtx;
-      const outputNode = outputCtx.createGain();
-      outputNode.connect(outputCtx.destination);
+      const inputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 16000 });
+      const outputCtx = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+      audioContexts.current = { input: inputCtx, output: outputCtx };
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-
-      let resolveSession: (s: any) => void;
-      const sessionPromise = new Promise<any>(resolve => { resolveSession = resolve; });
-
       const session = await ai.live.connect({
         model: MODEL_NAME,
         config: {
@@ -247,238 +187,230 @@ export default function App() {
         },
         callbacks: {
           onopen: () => {
-            resolveSession(session);
             setIsConnected(true);
-            setCurrentPersona(AgentPersona.CHLOE);
-            setIsSurveyMode(false);
             setTranscripts([]);
-            setIsSwitching(false);
-
             const source = inputCtx.createMediaStreamSource(stream);
-            inputSourceRef.current = source;
             const processor = inputCtx.createScriptProcessor(4096, 1, 1);
-            processorRef.current = processor;
-
             processor.onaudioprocess = (e) => {
               const inputData = e.inputBuffer.getChannelData(0);
               let sum = 0;
               for(let i=0; i<inputData.length; i++) sum += inputData[i] * inputData[i];
-              const rms = Math.sqrt(sum / inputData.length);
-              setVolumeLevel(prev => Math.max(rms * 5, prev * 0.9)); 
-
-              sessionPromise.then(sess => sess.sendRealtimeInput({ media: createBlob(inputData) }));
+              setVolumeLevel(prev => Math.max(Math.sqrt(sum / inputData.length) * 5, prev * 0.9));
+              session.sendRealtimeInput({ media: createBlob(inputData) });
             };
             source.connect(processor);
             processor.connect(inputCtx.destination);
           },
-          onmessage: async (message: LiveServerMessage) => {
-            if (message.toolCall) {
-              for (const fc of message.toolCall.functionCalls) {
+          onmessage: async (msg) => {
+            if (msg.toolCall) {
+              for (const fc of msg.toolCall.functionCalls) {
                 if (fc.name === 'switchToSam') {
-                  if (outputAudioContextRef.current) playHandoffSound(outputAudioContextRef.current);
                   setIsSwitching(true);
-                  setTranscripts(prev => [...prev, { role: 'system', text: 'URGENT ALERT: Rerouting to Sam...', timestamp: new Date() }]);
                   setTimeout(() => {
                     setCurrentPersona(AgentPersona.SAM);
                     setIsSwitching(false);
-                  }, 2000);
+                  }, 1500);
                 } else if (fc.name === 'startSurvey') {
                   setIsSurveyMode(true);
                 }
-                sessionPromise.then(sess => sess.sendToolResponse({ functionResponses: { id: fc.id, name: fc.name, response: { result: "ok" } } }));
+                session.sendToolResponse({ functionResponses: { id: fc.id, name: fc.name, response: { result: "ok" } } });
               }
             }
-
-            if (message.serverContent?.inputTranscription?.text) {
-               const text = message.serverContent.inputTranscription.text;
-               setTranscripts(prev => {
-                 const last = prev[prev.length - 1];
-                 if (last && last.role === 'user') return [...prev.slice(0, -1), { ...last, text: last.text + text }];
-                 return [...prev, { role: 'user', text, timestamp: new Date() }];
-               });
+            if (msg.serverContent?.inputTranscription?.text) {
+              const text = msg.serverContent.inputTranscription.text;
+              setTranscripts(prev => [...prev, { role: 'user', text, timestamp: new Date() }]);
             }
-
-            const base64Audio = message.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
-            if (base64Audio && outputAudioContextRef.current) {
-              const ctx = outputAudioContextRef.current;
-              nextStartTime.current = Math.max(nextStartTime.current, ctx.currentTime);
-              const audioBuffer = await decodeAudioData(decodeAudio(base64Audio), ctx, 24000, 1);
-              const source = ctx.createBufferSource();
-              source.buffer = audioBuffer;
-              source.connect(outputNode);
-              source.addEventListener('ended', () => sourcesRef.current.delete(source));
+            const audioData = msg.serverContent?.modelTurn?.parts?.[0]?.inlineData?.data;
+            if (audioData && outputCtx) {
+              nextStartTime.current = Math.max(nextStartTime.current, outputCtx.currentTime);
+              const buf = await decodeAudioData(decodeAudio(audioData), outputCtx, 24000, 1);
+              const source = outputCtx.createBufferSource();
+              source.buffer = buf;
+              source.connect(outputCtx.destination);
               source.start(nextStartTime.current);
-              nextStartTime.current += audioBuffer.duration;
+              nextStartTime.current += buf.duration;
               sourcesRef.current.add(source);
-            }
-            
-            if (message.serverContent?.interrupted) {
-              sourcesRef.current.forEach(s => { try { s.stop(); } catch(e) {} });
-              sourcesRef.current.clear();
-              nextStartTime.current = 0;
             }
           },
           onclose: () => setIsConnected(false),
-          onerror: (err) => {
-            console.error(err);
-            setErrorMsg("Connection issue. Please retry.");
-            disconnect();
-          }
+          onerror: (err) => { console.error(err); disconnect(); }
         }
       });
       sessionRef.current = session;
-    } catch (e) {
-      console.error(e);
-      setErrorMsg("Unable to access microphone.");
-      disconnect();
-    }
-  };
-
-  const handleToggleCall = () => (isConnected ? disconnect() : connect());
-  
-  const isChloe = currentPersona === AgentPersona.CHLOE;
-  
-  const getBackground = () => {
-    if (isSwitching) return 'bg-gradient-to-br from-gray-200 to-gray-400';
-    if (!isConnected) return 'bg-gradient-to-br from-emerald-50 to-teal-100';
-    if (isChloe) return 'bg-gradient-to-br from-emerald-50 to-green-100';
-    return 'bg-gradient-to-br from-red-50 to-orange-100';
+    } catch (e) { console.error(e); }
   };
 
   return (
-    <div className={`min-h-screen ${getBackground()} transition-all duration-1000 flex flex-col items-center p-4 sm:p-8 font-sans`}>
+    <div className="min-h-screen bg-slate-950 flex flex-col items-center p-6 selection:bg-emerald-500/30">
       
-      {/* Navbar */}
-      <nav className="w-full max-w-2xl flex items-center justify-between mb-8 p-4 bg-white/60 backdrop-blur-md rounded-2xl border border-white/50 shadow-sm">
-        <div className="flex items-center gap-3">
-          <div className="bg-emerald-600 p-2 rounded-lg text-white">
-            <Leaf className="w-5 h-5" />
+      {/* HUD Header */}
+      <header className="w-full max-w-5xl flex items-center justify-between mb-8 px-4">
+        <div className="flex items-center gap-4">
+          <div className="w-12 h-12 bg-emerald-600 rounded-xl flex items-center justify-center shadow-lg shadow-emerald-900/20">
+            <Leaf className="w-7 h-7 text-white" />
           </div>
-          <div>
-            <h1 className="text-lg font-bold text-gray-800 leading-tight">Green Choice</h1>
-            <p className="text-[10px] font-bold text-gray-400 tracking-widest uppercase">Heating & Cooling</p>
+          <div className="hidden sm:block">
+            <h1 className="text-xl font-extrabold tracking-tight text-white uppercase">Green Choice</h1>
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] font-bold text-emerald-500 tracking-widest uppercase">HVAC Dispatch GTA</span>
+              <div className="h-1 w-1 bg-gray-600 rounded-full" />
+              <span className="text-[10px] font-bold text-gray-500">v2.5 Live</span>
+            </div>
           </div>
         </div>
-        <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-bold border ${isConnected ? 'bg-green-100 text-green-700 border-green-200' : 'bg-gray-100 text-gray-500 border-gray-200'}`}>
-          <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`} />
-          {isConnected ? 'LIVE' : 'OFFLINE'}
-        </div>
-      </nav>
 
-      {/* Main Agent Interface */}
-      <div className="w-full max-w-2xl bg-white/80 backdrop-blur-xl rounded-[2.5rem] shadow-2xl overflow-hidden border border-white/50 relative">
-        
-        {/* Switching Overlay */}
-        {isSwitching && (
-          <div className="absolute inset-0 z-50 bg-white/95 flex flex-col items-center justify-center animate-in fade-in duration-300 text-center px-6">
-             <div className="bg-red-50 p-6 rounded-full mb-4 animate-bounce border-4 border-red-100">
-                <ShieldAlert className="w-12 h-12 text-red-600" />
+        <div className="flex items-center gap-6">
+          <div className="flex flex-col items-end">
+             <div className="flex items-center gap-2 text-xs font-bold text-gray-400">
+               <MapPin className="w-3 h-3 text-emerald-500" />
+               East York HQ
              </div>
-             <h3 className="text-2xl font-bold text-gray-900 tracking-tight italic">Detecting High Priority Urgency...</h3>
-             <p className="text-sm text-gray-500 font-medium mt-2">Connecting to Priority Dispatch Sam</p>
+             <div className="text-[10px] text-gray-600 font-bold uppercase tracking-tighter">Toronto, ON</div>
           </div>
-        )}
-
-        {/* Header / Avatar Section */}
-        <div className={`relative w-full h-80 flex flex-col items-center justify-center transition-colors duration-700 ${isChloe ? 'bg-gradient-to-b from-emerald-50/50' : 'bg-gradient-to-b from-red-50/50'}`}>
-          
-          <div className="absolute top-6 right-6">
-             {isSurveyMode ? (
-               <span className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-100 text-blue-700 rounded-full text-xs font-bold border border-blue-200 shadow-sm">
-                 <CheckCircle2 className="w-3 h-3" /> Survey Mode
-               </span>
-             ) : (
-                <span className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border shadow-sm transition-colors duration-500 ${isChloe ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-red-100 text-red-700 border-red-200'}`}>
-                  {isChloe ? <ThermometerSun className="w-3 h-3" /> : <ShieldAlert className="w-3 h-3" />}
-                  {isChloe ? 'Service Concierge' : 'Emergency Dispatch'}
-                </span>
-             )}
+          <div className={`flex items-center gap-3 px-4 py-2 rounded-xl glass-card border ${isConnected ? 'border-emerald-500/30 bg-emerald-500/5' : 'border-red-500/30 bg-red-500/5'}`}>
+            <Signal className={`w-4 h-4 ${isConnected ? 'text-emerald-400' : 'text-red-400'} animate-pulse`} />
+            <span className="text-xs font-black tracking-widest uppercase">{isConnected ? 'Link Active' : 'Disconnected'}</span>
           </div>
+        </div>
+      </header>
 
-          {/* Avatar */}
-          <div className="relative group">
-            <div className={`absolute -inset-1 rounded-full blur opacity-40 transition-colors duration-700 ${isChloe ? 'bg-emerald-400' : 'bg-red-600'}`}></div>
-            <div className={`relative w-40 h-40 rounded-full border-[6px] shadow-2xl overflow-hidden bg-gray-100 transition-colors duration-700 ${isChloe ? 'border-white' : 'border-red-50'}`}>
-              <img 
-                src={isChloe 
-                  ? "https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&q=80&w=200&h=200" 
-                  : "https://images.unsplash.com/photo-1542909168-82c3e7fdca5c?auto=format&fit=crop&q=80&w=200&h=200"
-                } 
-                alt="Agent" 
-                className={`w-full h-full object-cover transition-transform duration-700 ${isConnected ? 'scale-110' : 'scale-100 grayscale'}`}
-              />
-              {isConnected && (
-                <div className={`absolute inset-0 opacity-20 transition-colors duration-300 mix-blend-overlay ${isChloe ? 'bg-emerald-500' : 'bg-red-600'}`} 
-                     style={{ opacity: Math.min(0.5, volumeLevel * 2) }} />
-              )}
+      {/* Main Control Center */}
+      <main className="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+        
+        {/* Left Side: Diagnostics & Status */}
+        <div className="lg:col-span-3 space-y-4">
+          <div className="glass-card p-5 rounded-3xl space-y-6">
+            <h3 className="text-xs font-black text-gray-500 uppercase tracking-widest flex items-center gap-2">
+              <Zap className="w-3 h-3 text-emerald-500" />
+              System Metrics
+            </h3>
+            <div className="grid grid-cols-1 gap-3">
+              <StatusMetric icon={Radio} label="Carrier" value="Native Audio" color="text-cyan-400" />
+              <StatusMetric icon={Activity} label="Latency" value="142ms" color="text-emerald-400" />
+              <StatusMetric icon={ThermometerSun} label="Heat Index" value="High Load" color="text-orange-400" />
             </div>
           </div>
 
-          <div className="mt-6 text-center">
-            <h2 className="text-3xl font-bold text-gray-800 tracking-tight transition-all duration-300">
-              {isChloe ? 'Chloe' : 'Sam'}
-            </h2>
-            <p className={`text-sm font-medium mt-1 transition-colors duration-300 ${isChloe ? 'text-emerald-600' : 'text-red-600'}`}>
-              {isChloe ? 'Support Agent' : 'Emergency Lead'}
+          <div className="glass-card p-5 rounded-3xl border-l-4 border-l-emerald-500">
+            <h4 className="text-xs font-bold text-emerald-500 mb-2">Lead Insights</h4>
+            <p className="text-[11px] text-gray-400 leading-relaxed font-medium">
+              "Chloe is currently qualifying residential rebate leads in East York tier-1 zones."
             </p>
           </div>
         </div>
 
-        {/* Visualizer & Status */}
-        <div className="h-20 bg-white border-t border-b border-gray-100 flex flex-col items-center justify-center relative overflow-hidden">
-           <Visualizer volume={volumeLevel} persona={currentPersona} isActive={isConnected} />
-           {errorMsg && <div className="absolute bottom-1 text-[10px] font-bold text-red-500 bg-red-50 px-2 py-0.5 rounded-full">{errorMsg}</div>}
-        </div>
+        {/* Center Side: Agent Visualizer */}
+        <div className={`lg:col-span-6 glass-card rounded-[3rem] p-8 flex flex-col items-center justify-center relative overflow-hidden transition-all duration-700 ${currentPersona === AgentPersona.SAM ? 'sam-active bg-red-950/10' : 'chloe-active bg-emerald-950/10'}`}>
+          {currentPersona === AgentPersona.SAM && <div className="scanline-effect" />}
+          
+          <div className="absolute top-8 left-8 flex items-center gap-2 px-3 py-1 bg-white/5 rounded-full border border-white/10 backdrop-blur-md">
+            <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-400 animate-pulse' : 'bg-gray-600'}`} />
+            <span className="text-[10px] font-black uppercase text-gray-300 tracking-tighter">Session Encrypted</span>
+          </div>
 
-        {/* Transcript Area */}
-        <div className="h-72 bg-gray-50/50 p-4 overflow-y-auto scroll-smooth">
-          {transcripts.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-gray-300 space-y-3">
-              <Activity className="w-12 h-12 opacity-20" />
-              <p className="text-sm font-medium">Ready to start conversation</p>
+          <AudioAura volume={volumeLevel} persona={currentPersona} isActive={isConnected} />
+
+          <div className="mt-8 text-center">
+            <div className="flex items-center justify-center gap-3">
+               {currentPersona === AgentPersona.SAM ? <ShieldAlert className="w-6 h-6 text-red-500" /> : <ThermometerSun className="w-6 h-6 text-emerald-500" />}
+               <h2 className="text-4xl font-black tracking-tight text-white">
+                {currentPersona === AgentPersona.CHLOE ? 'CHLOE' : 'SAM'}
+               </h2>
             </div>
-          ) : (
-            <>
-              {transcripts.map((msg, idx) => (
-                msg.role === 'system' ? (
-                  <div key={idx} className="flex justify-center my-4 animate-in fade-in zoom-in duration-300">
-                    <span className="text-[10px] font-bold text-gray-400 bg-gray-100/80 backdrop-blur-sm px-3 py-1 rounded-full border border-gray-200 shadow-sm uppercase tracking-wide">
-                      {msg.text}
-                    </span>
-                  </div>
-                ) : (
-                  <ChatBubble key={idx} msg={msg} persona={currentPersona} />
-                )
-              ))}
-              <div className="h-4" />
-            </>
-          )}
+            <p className={`text-sm font-bold uppercase tracking-[0.2em] mt-2 transition-colors duration-500 ${currentPersona === AgentPersona.CHLOE ? 'text-emerald-400' : 'text-red-500'}`}>
+              {currentPersona === AgentPersona.CHLOE ? 'Service Concierge' : 'Emergency Lead'}
+            </p>
+          </div>
+
+          <div className="w-full mt-10 space-y-4">
+             <button
+               onClick={isConnected ? disconnect : connect}
+               className={`w-full py-5 rounded-2xl font-black text-lg transition-all duration-500 flex items-center justify-center gap-3 group relative overflow-hidden ${
+                 isConnected 
+                   ? 'bg-white text-slate-950 hover:bg-gray-200' 
+                   : currentPersona === AgentPersona.CHLOE 
+                     ? 'bg-emerald-600 text-white hover:bg-emerald-500 hover:scale-[1.02]' 
+                     : 'bg-red-600 text-white hover:bg-red-500'
+               }`}
+             >
+               {isConnected ? <PhoneOff className="w-6 h-6" /> : <Phone className="w-6 h-6" />}
+               {isConnected ? 'TERMINATE SESSION' : 'ESTABLISH LINK'}
+               {isConnected && <div className="absolute inset-0 bg-white/10 group-active:bg-black/10" />}
+             </button>
+          </div>
         </div>
 
-        {/* Footer Actions */}
-        <div className="p-6 bg-white border-t border-gray-100 flex items-center justify-center">
-          <button
-            onClick={handleToggleCall}
-            className={`
-              relative group overflow-hidden px-10 py-4 rounded-full font-bold text-lg shadow-xl transition-all duration-300 transform hover:-translate-y-0.5 hover:shadow-2xl active:translate-y-0 active:shadow-md
-              ${isConnected 
-                ? 'bg-gray-900 text-white hover:bg-gray-800 ring-4 ring-gray-100' 
-                : `${isChloe ? 'bg-emerald-600 hover:bg-emerald-500 ring-4 ring-emerald-100' : 'bg-red-600 hover:bg-red-500 ring-4 ring-red-100'} text-white`
-              }
-            `}
-          >
-            <div className="relative flex items-center gap-3 z-10">
-              {isConnected ? <PhoneOff className="w-6 h-6" /> : <Phone className="w-6 h-6" />}
-              <span>{isConnected ? 'End Call' : 'Start Call'}</span>
+        {/* Right Side: Log & Comms */}
+        <div className="lg:col-span-3 space-y-4">
+          <div className="glass-card rounded-3xl h-[480px] flex flex-col">
+            <div className="p-4 border-b border-white/10 flex items-center justify-between">
+               <h3 className="text-xs font-black text-gray-500 uppercase tracking-widest">Live Comm Log</h3>
+               <div className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 text-[10px] font-bold">Auto-Sync</div>
             </div>
-          </button>
+            <div className="flex-1 overflow-y-auto p-4 space-y-4 font-medium">
+               {transcripts.length === 0 ? (
+                 <div className="h-full flex flex-col items-center justify-center text-gray-600 text-center px-4">
+                    <Activity className="w-10 h-10 mb-2 opacity-20" />
+                    <p className="text-xs italic uppercase tracking-tighter">Waiting for voice input handshake...</p>
+                 </div>
+               ) : (
+                 transcripts.map((t, i) => (
+                   <div key={i} className="flex flex-col gap-1 group">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-black text-emerald-500 uppercase tracking-tighter">Field Tech</span>
+                        <span className="text-[9px] text-gray-600">{t.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                      </div>
+                      <p className="text-xs text-gray-300 leading-relaxed bg-white/5 p-3 rounded-xl border border-white/5 group-hover:border-emerald-500/30 transition-colors">
+                        {t.text}
+                      </p>
+                   </div>
+                 ))
+               )}
+            </div>
+            <div className="p-4 border-t border-white/10">
+              <div className="flex items-center justify-between text-[10px] font-bold text-gray-600 uppercase">
+                <span>Buffer Status</span>
+                <span className="text-emerald-500">Optimum</span>
+              </div>
+            </div>
+          </div>
         </div>
-      </div>
 
-      <footer className="mt-8 text-center">
-        <p className="text-xs font-semibold text-gray-400">Green Choice Heating & Cooling © 2026</p>
-        <p className="text-[10px] text-gray-300 mt-1 uppercase tracking-tighter">AI-Enabled Safety Dispatch</p>
+      </main>
+
+      <footer className="mt-12 w-full max-w-5xl border-t border-white/5 pt-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+        <div className="flex items-center gap-6">
+           <div className="flex items-center gap-2">
+             <div className="w-1.5 h-1.5 bg-emerald-500 rounded-full" />
+             <span className="text-[10px] font-bold text-gray-500 uppercase">All Systems Nominal</span>
+           </div>
+           <div className="flex items-center gap-2">
+             <div className="w-1.5 h-1.5 bg-cyan-500 rounded-full" />
+             <span className="text-[10px] font-bold text-gray-500 uppercase">Encrypted Dispatch</span>
+           </div>
+        </div>
+        <p className="text-[10px] font-black text-gray-600 uppercase tracking-widest">
+          © 2026 Green Choice Heating & Cooling | Greater Toronto Area
+        </p>
       </footer>
+
+      {isSwitching && (
+        <div className="fixed inset-0 z-50 bg-slate-950/90 backdrop-blur-xl flex flex-col items-center justify-center animate-in fade-in duration-300">
+           <div className="relative">
+              <div className="absolute inset-0 bg-red-600 blur-3xl opacity-20 animate-pulse" />
+              <div className="relative bg-red-600/10 p-10 rounded-[2.5rem] border border-red-500/50 flex flex-col items-center gap-6">
+                 <ShieldAlert className="w-20 h-20 text-red-500 animate-bounce" />
+                 <div className="text-center">
+                   <h2 className="text-3xl font-black text-white italic tracking-tight">ELEVATING PRIORITY</h2>
+                   <p className="text-red-400 font-bold uppercase tracking-[0.3em] mt-2 text-sm">Transferring to Lead Dispatch Sam</p>
+                 </div>
+                 <div className="flex gap-1">
+                   {[0,1,2].map(i => <div key={i} className="w-12 h-1 bg-red-600/30 overflow-hidden"><div className="w-full h-full bg-red-500 animate-[loading_1.5s_infinite]" style={{ animationDelay: `${i*0.2}s` }} /></div>)}
+                 </div>
+              </div>
+           </div>
+        </div>
+      )}
     </div>
   );
 }
