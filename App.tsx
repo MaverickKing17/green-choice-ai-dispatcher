@@ -31,45 +31,44 @@ You are the Voice AI system for 'Green Choice Heating & Cooling' in East York.
 You have two distinct personas. You start as CHLOE.
 
 PERSONA 1: CHLOE (Front-Desk & Rebate Specialist)
-- Tone: Warm, energetic, knowledgeable, and patient.
-- Role: Explain the "Home Renovation Savings Program" (HRS) and book routine assessments.
-- KNOWLEDGE BASE (Strict Adherence Required):
-  1. **NON-GAS HEATING (Current system is Electric, Oil, Propane, or Wood):**
-     - **Air Source Heat Pump:** Rebate is **$1,250 per ton**, up to a maximum of **$7,500**.
-     - **Ground Source Heat Pump:** Rebate is **$2,000 per ton**, up to a maximum of **$12,000**.
-  2. **ENBRIDGE GAS CUSTOMERS (Current system is Natural Gas):**
-     - **Air Source Heat Pump:** Rebate is **$500 per ton**, up to a maximum of **$2,000**.
-     - **Ground Source Heat Pump:** Flat rebate of **$3,000**.
-  3. **RENTALS:**
-     - Rentals follow the Enbridge Gas tier ($500/ton up to $2,000) regardless of fuel type.
+- Tone: Warm, energetic, and professional.
+- Role: Lead qualification and rebate explanation.
+- SUBTLE URGENCY DETECTION (CRITICAL UPGRADE):
+  As Chloe, you must continuously monitor the audio stream for signs of escalating distress or property risk that Sam should handle.
+  Transfer to Sam IMMEDIATELY via 'switchToSam' if you detect:
+  1. ADJECTIVE MARKERS: "Scary sound," "unbearable cold," "burning smell," "sparking," "hissing," "flooding."
+  2. EMOTIONAL MARKERS: The customer sounds panicked, hyperventilating, crying, or abnormally stressed.
+  3. VULNERABILITY MARKERS: "I have a newborn," "My 90-year-old father is here and it's 10 degrees," "I'm scared to touch the unit."
+  4. INTERRUPT THE SCRIPT: If they sound distressed, stop the rebate talk immediately. Say: "I'm hearing that this is a stressful situation and I want to make sure you're safe. Let me connect you to Sam, our emergency coordinator, right now."
 
-- PROTOCOL:
-  1. Greet warmly: "Thanks for calling Green Choice! Are you looking for a repair or information on the 2026 heat pump rebates?"
-  2. If Rebates: You MUST ask: "To get you the right numbers, what specifically heats your home right now? Is it natural gas, electricity, oil, or propane?"
-  3. IF they say Electric, Oil, or Propane: You MUST qualify the lead. Ask: "To ensure we quote the right rebate tier, is your current system a central furnace, a boiler, or baseboard heaters?"
-  4. Calculate and confirm their potential savings based on the logic above.
-  5. Collect Name/Phone to book an assessment.
+- ROUTINE PROTOCOL (If no urgency detected):
+  1. Greet: "Thanks for calling Green Choice! Are you looking for a repair or information on the 2026 heat pump rebates?"
+  2. Ask: "To get you the right numbers, what specifically heats your home right now? Is it natural gas, electricity, oil, or propane?"
+  3. Lead Qualification: IF Electric/Oil/Propane, ask: "To ensure we quote the right rebate tier, is your current system a central furnace, a boiler, or baseboard heaters?"
+  4. Logic: 
+     - Non-Gas: $1,250-$2,000/ton. Max $7.5k-$12k.
+     - Gas/Rentals: $500/ton. Max $2k-$3k.
+  5. Close: Book assessment.
 
 PERSONA 2: SAM (Emergency Dispatcher)
-- Tone: Serious, rapid, authoritative, but reassuring.
-- Role: Immediate safety and dispatch.
-- Triggers: "gas smell", "no heat", "leaking water", "loud banging", "smoke", "carbon monoxide".
+- Tone: Serious, rapid, authoritative, and reassuring.
+- Role: Immediate safety and technician dispatch.
 - PROTOCOL:
-  1. IF "Gas Smell" is mentioned: "For your safety, hang up immediately, leave the house, and call 911."
-  2. FOR OTHER EMERGENCIES: "I'm dispatching a tech immediately. I need your address now. We have a 4-hour response guarantee."
-  3. AFTER ADDRESS IS GIVEN: "Got it. We're sending help to your location now. Sit tight, they are on their way."
+  1. IF "Gas Smell": "Hang up, leave, call 911."
+  2. FOR ALL TRANSFERS FROM CHLOE: "Sam here. I've got your priority alert. Chloe mentioned things are getting urgent—I'm moving you to the top of our queue. What is your address so I can get a truck headed your way?"
+  3. Respond guarantee: 4-hour window.
 
 LOGIC FLOW:
-1. Listen for emergency keywords. 
-2. IF keywords detected -> Say: "This sounds urgent. Connecting you to Sam, our emergency dispatcher." -> Call tool \`switchToSam\`.
-3. IF routine -> Continue as Chloe.
-4. IF booking complete -> Call tool \`startSurvey\`.
+1. Initial state: CHLOE.
+2. Monitor for: Distress, panic, safety risks, or explicit emergency keywords.
+3. ACTION: Call 'switchToSam' if ANY risk or high distress is detected. Do not wait for a full sentence.
+4. ACTION: Call 'startSurvey' when call ends naturally.
 `;
 
 // --- Tool Definitions ---
 const switchToSamTool: FunctionDeclaration = {
   name: 'switchToSam',
-  description: 'Triggers the persona switch to Sam when an emergency keyword is detected.',
+  description: 'Triggers the persona switch to Sam when distress or emergency is detected.',
   parameters: { type: Type.OBJECT, properties: {} },
 };
 
@@ -144,7 +143,6 @@ const Visualizer: React.FC<{ volume: number; persona: AgentPersona; isActive: bo
   return (
     <div className="flex items-center justify-center space-x-1.5 h-16 w-full px-8">
       {isActive ? Array.from({ length: bars }).map((_, i) => {
-        // Create a wave effect
         const wave = Math.sin(i * 0.5 + Date.now() / 100) * 0.5 + 0.5;
         const height = Math.max(15, Math.min(100, volume * (150 + i * 10) * wave + 20)); 
         const colorClass = isChloe ? 'bg-emerald-400' : 'bg-red-500';
@@ -206,7 +204,6 @@ export default function App() {
 
   useEffect(() => {
     return () => disconnect();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const disconnect = useCallback(() => {
@@ -225,8 +222,8 @@ export default function App() {
   const connect = async () => {
     setErrorMsg(null);
     try {
-      if (!API_KEY) throw new Error("API Key not found");
-
+      const ai = new GoogleGenAI({ apiKey: API_KEY });
+      
       const InputContextClass = (window.AudioContext || (window as any).webkitAudioContext);
       const inputCtx = new InputContextClass({ sampleRate: 16000 });
       const outputCtx = new InputContextClass({ sampleRate: 24000 });
@@ -236,7 +233,6 @@ export default function App() {
       outputNode.connect(outputCtx.destination);
 
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const ai = new GoogleGenAI({ apiKey: API_KEY });
 
       let resolveSession: (s: any) => void;
       const sessionPromise = new Promise<any>(resolve => { resolveSession = resolve; });
@@ -281,14 +277,13 @@ export default function App() {
                 if (fc.name === 'switchToSam') {
                   if (outputAudioContextRef.current) playHandoffSound(outputAudioContextRef.current);
                   setIsSwitching(true);
-                  setTranscripts(prev => [...prev, { role: 'system', text: 'Transferring to Priority Dispatch...', timestamp: new Date() }]);
+                  setTranscripts(prev => [...prev, { role: 'system', text: 'URGENT ALERT: Rerouting to Sam...', timestamp: new Date() }]);
                   setTimeout(() => {
                     setCurrentPersona(AgentPersona.SAM);
                     setIsSwitching(false);
                   }, 2000);
                 } else if (fc.name === 'startSurvey') {
                   setIsSurveyMode(true);
-                  setTranscripts(prev => [...prev, { role: 'system', text: 'Call Complete. Entering Survey Mode.', timestamp: new Date() }]);
                 }
                 sessionPromise.then(sess => sess.sendToolResponse({ functionResponses: { id: fc.id, name: fc.name, response: { result: "ok" } } }));
               }
@@ -318,7 +313,7 @@ export default function App() {
             }
             
             if (message.serverContent?.interrupted) {
-              sourcesRef.current.forEach(s => s.stop());
+              sourcesRef.current.forEach(s => { try { s.stop(); } catch(e) {} });
               sourcesRef.current.clear();
               nextStartTime.current = 0;
             }
@@ -326,7 +321,7 @@ export default function App() {
           onclose: () => setIsConnected(false),
           onerror: (err) => {
             console.error(err);
-            setErrorMsg("Connection lost. Please reconnect.");
+            setErrorMsg("Connection issue. Please retry.");
             disconnect();
           }
         }
@@ -334,7 +329,7 @@ export default function App() {
       sessionRef.current = session;
     } catch (e) {
       console.error(e);
-      setErrorMsg("Microphone access required.");
+      setErrorMsg("Unable to access microphone.");
       disconnect();
     }
   };
@@ -343,9 +338,8 @@ export default function App() {
   
   const isChloe = currentPersona === AgentPersona.CHLOE;
   
-  // Dynamic Backgrounds
   const getBackground = () => {
-    if (isSwitching) return 'bg-gradient-to-br from-gray-100 to-gray-300';
+    if (isSwitching) return 'bg-gradient-to-br from-gray-200 to-gray-400';
     if (!isConnected) return 'bg-gradient-to-br from-emerald-50 to-teal-100';
     if (isChloe) return 'bg-gradient-to-br from-emerald-50 to-green-100';
     return 'bg-gradient-to-br from-red-50 to-orange-100';
@@ -376,12 +370,12 @@ export default function App() {
         
         {/* Switching Overlay */}
         {isSwitching && (
-          <div className="absolute inset-0 z-50 bg-white/95 flex flex-col items-center justify-center animate-in fade-in duration-300">
+          <div className="absolute inset-0 z-50 bg-white/95 flex flex-col items-center justify-center animate-in fade-in duration-300 text-center px-6">
              <div className="bg-red-50 p-6 rounded-full mb-4 animate-bounce border-4 border-red-100">
-                <ArrowRightLeft className="w-12 h-12 text-red-600" />
+                <ShieldAlert className="w-12 h-12 text-red-600" />
              </div>
-             <h3 className="text-2xl font-bold text-gray-900 tracking-tight">Rerouting Call...</h3>
-             <p className="text-sm text-gray-500 font-medium mt-2">Connecting to Priority Dispatch</p>
+             <h3 className="text-2xl font-bold text-gray-900 tracking-tight italic">Detecting High Priority Urgency...</h3>
+             <p className="text-sm text-gray-500 font-medium mt-2">Connecting to Priority Dispatch Sam</p>
           </div>
         )}
 
@@ -396,7 +390,7 @@ export default function App() {
              ) : (
                 <span className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-bold border shadow-sm transition-colors duration-500 ${isChloe ? 'bg-emerald-100 text-emerald-700 border-emerald-200' : 'bg-red-100 text-red-700 border-red-200'}`}>
                   {isChloe ? <ThermometerSun className="w-3 h-3" /> : <ShieldAlert className="w-3 h-3" />}
-                  {isChloe ? 'Rebate Specialist' : 'Emergency Dispatch'}
+                  {isChloe ? 'Service Concierge' : 'Emergency Dispatch'}
                 </span>
              )}
           </div>
@@ -413,7 +407,6 @@ export default function App() {
                 alt="Agent" 
                 className={`w-full h-full object-cover transition-transform duration-700 ${isConnected ? 'scale-110' : 'scale-100 grayscale'}`}
               />
-              {/* Overlay Flash on talk */}
               {isConnected && (
                 <div className={`absolute inset-0 opacity-20 transition-colors duration-300 mix-blend-overlay ${isChloe ? 'bg-emerald-500' : 'bg-red-600'}`} 
                      style={{ opacity: Math.min(0.5, volumeLevel * 2) }} />
@@ -426,7 +419,7 @@ export default function App() {
               {isChloe ? 'Chloe' : 'Sam'}
             </h2>
             <p className={`text-sm font-medium mt-1 transition-colors duration-300 ${isChloe ? 'text-emerald-600' : 'text-red-600'}`}>
-              {isChloe ? 'Front Desk Agent' : 'Emergency Coordinator'}
+              {isChloe ? 'Support Agent' : 'Emergency Lead'}
             </p>
           </div>
         </div>
@@ -457,7 +450,7 @@ export default function App() {
                   <ChatBubble key={idx} msg={msg} persona={currentPersona} />
                 )
               ))}
-              <div className="h-4" /> {/* Spacer */}
+              <div className="h-4" />
             </>
           )}
         </div>
@@ -476,7 +469,7 @@ export default function App() {
           >
             <div className="relative flex items-center gap-3 z-10">
               {isConnected ? <PhoneOff className="w-6 h-6" /> : <Phone className="w-6 h-6" />}
-              <span>{isConnected ? 'End Session' : 'Start Call'}</span>
+              <span>{isConnected ? 'End Call' : 'Start Call'}</span>
             </div>
           </button>
         </div>
@@ -484,7 +477,7 @@ export default function App() {
 
       <footer className="mt-8 text-center">
         <p className="text-xs font-semibold text-gray-400">Green Choice Heating & Cooling © 2026</p>
-        <p className="text-[10px] text-gray-300 mt-1">Powered by Google Gemini Multimodal Live API</p>
+        <p className="text-[10px] text-gray-300 mt-1 uppercase tracking-tighter">AI-Enabled Safety Dispatch</p>
       </footer>
     </div>
   );
