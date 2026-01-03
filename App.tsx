@@ -5,7 +5,8 @@ import {
   Phone, PhoneOff, Leaf, Activity, 
   ArrowRightLeft, ThermometerSun, ShieldAlert, 
   MapPin, Signal, Radio, 
-  Zap, Clock, Globe, ShieldCheck, Sparkles
+  Zap, Clock, Globe, ShieldCheck, Sparkles, 
+  Volume2
 } from 'lucide-react';
 
 const API_KEY = (process.env.API_KEY || '');
@@ -33,6 +34,33 @@ const startSurveyTool: FunctionDeclaration = {
 };
 
 const tools = [{ functionDeclarations: [switchToSamTool, startSurveyTool] }];
+
+// --- Sound Synthesizer ---
+function playHandoffChime(ctx: AudioContext) {
+  const now = ctx.currentTime;
+  
+  // Create a pleasant but urgent 2-tone chime
+  const playTone = (freq: number, start: number, duration: number, type: OscillatorType = 'sine') => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, start);
+    osc.frequency.exponentialRampToValueAtTime(freq * 1.5, start + duration);
+    
+    gain.gain.setValueAtTime(0, start);
+    gain.gain.linearRampToValueAtTime(0.2, start + 0.05);
+    gain.gain.exponentialRampToValueAtTime(0.001, start + duration);
+    
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    
+    osc.start(start);
+    osc.stop(start + duration);
+  };
+
+  playTone(440, now, 0.4); // A4
+  playTone(880, now + 0.15, 0.6, 'triangle'); // A5
+}
 
 function createBlob(data: Float32Array): BlobData {
   const l = data.length;
@@ -67,7 +95,7 @@ async function decodeAudioData(data: Uint8Array, ctx: AudioContext, sampleRate: 
   return buffer;
 }
 
-const AudioVisualizerPortal: React.FC<{ volume: number; persona: AgentPersona; isActive: boolean }> = ({ volume, persona, isActive }) => {
+const AudioVisualizerPortal: React.FC<{ volume: number; persona: AgentPersona; isActive: boolean; isSwitching: boolean }> = ({ volume, persona, isActive, isSwitching }) => {
   const isChloe = persona === AgentPersona.CHLOE;
   const primaryColor = isChloe ? 'from-emerald-400' : 'from-rose-500';
   const secondaryColor = isChloe ? 'to-cyan-400' : 'to-orange-400';
@@ -76,44 +104,25 @@ const AudioVisualizerPortal: React.FC<{ volume: number; persona: AgentPersona; i
   const scale = 1 + (volume * 1.5);
 
   return (
-    <div className="relative flex items-center justify-center w-80 h-80">
+    <div className={`relative flex items-center justify-center w-80 h-80 transition-all duration-300 ${isSwitching ? 'scale-110 rotate-6' : ''}`}>
       {/* Background Blooming Glow */}
       <div 
-        className={`absolute inset-0 rounded-full bg-gradient-to-br ${primaryColor} ${secondaryColor} opacity-[0.15] blur-[60px] transition-all duration-700`}
+        className={`absolute inset-0 rounded-full bg-gradient-to-br ${primaryColor} ${secondaryColor} ${isSwitching ? 'opacity-40 blur-[100px]' : 'opacity-[0.15] blur-[60px]'} transition-all duration-700`}
         style={{ transform: `scale(${scale * 1.4})` }}
       />
       
       {/* Dynamic Spectrum Rings */}
       <div 
-        className={`absolute inset-0 rounded-full border-[3px] border-${accentColor}-500/10 transition-all duration-300`}
+        className={`absolute inset-0 rounded-full border-[3px] border-${accentColor}-500/10 transition-all duration-300 ${isSwitching ? 'border-white animate-ping' : ''}`}
         style={{ transform: `scale(${scale * 1.15})` }}
       />
-      <div 
-        className={`absolute inset-6 rounded-full border border-${accentColor}-400/20 transition-all duration-500`}
-        style={{ transform: `scale(${scale * 1.05})` }}
-      />
-
-      {/* Floating Particles (Decorative) */}
-      <div className="absolute inset-0 animate-spin-slow">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <div 
-            key={i} 
-            className={`absolute w-1.5 h-1.5 rounded-full bg-gradient-to-br ${primaryColor} ${secondaryColor} opacity-40`}
-            style={{ 
-                top: `${50 + 45 * Math.sin(i * Math.PI / 3)}%`, 
-                left: `${50 + 45 * Math.cos(i * Math.PI / 3)}%`,
-                boxShadow: `0 0 10px rgba(0,0,0,0.1)` 
-            }}
-          />
-        ))}
-      </div>
 
       {/* Radial Frequency Spectrum */}
       <div className="absolute inset-0 flex items-center justify-center">
         {Array.from({ length: 60 }).map((_, i) => (
           <div
             key={i}
-            className={`absolute w-1 rounded-full bg-gradient-to-t ${primaryColor} ${secondaryColor} transition-all duration-75`}
+            className={`absolute w-1 rounded-full bg-gradient-to-t ${primaryColor} ${secondaryColor} transition-all duration-75 ${isSwitching ? 'bg-white h-[40%]' : ''}`}
             style={{
               height: isActive ? `${Math.max(12, volume * 150 * (0.7 + Math.random() * 0.3))}%` : '4px',
               transform: `rotate(${i * 6}deg) translateY(-115px)`,
@@ -125,7 +134,7 @@ const AudioVisualizerPortal: React.FC<{ volume: number; persona: AgentPersona; i
       </div>
 
       {/* The Agent Portal */}
-      <div className={`relative w-48 h-48 rounded-[3rem] p-1.5 rotate-3 transition-all duration-700 ${isChloe ? 'agent-glow-chloe bg-emerald-500/10' : 'agent-glow-sam bg-rose-500/10'} overflow-hidden shadow-2xl`}>
+      <div className={`relative w-48 h-48 rounded-[3rem] p-1.5 rotate-3 transition-all duration-700 ${isChloe ? 'agent-glow-chloe bg-emerald-500/10' : 'agent-glow-sam bg-rose-500/10'} overflow-hidden shadow-2xl ${isSwitching ? 'blur-sm scale-95 opacity-50' : ''}`}>
         <div className="w-full h-full rounded-[2.8rem] overflow-hidden bg-white ring-4 ring-white/80 shadow-inner">
           <img 
             src={isChloe 
@@ -135,15 +144,16 @@ const AudioVisualizerPortal: React.FC<{ volume: number; persona: AgentPersona; i
             className={`w-full h-full object-cover transition-all duration-1000 ${isActive ? 'scale-110' : 'scale-100 grayscale-[0.5]'}`}
             alt="AI Agent"
           />
-          {isActive && (
-            <div className={`absolute inset-0 bg-gradient-to-t from-${accentColor}-600/20 to-transparent mix-blend-overlay`} />
-          )}
         </div>
-        {/* Sparkle effect on talk */}
-        {isActive && volume > 0.1 && (
+        {isActive && volume > 0.1 && !isSwitching && (
             <Sparkles className={`absolute top-4 right-4 w-6 h-6 text-${accentColor}-400 animate-pulse`} />
         )}
       </div>
+
+      {/* Transition Flash */}
+      {isSwitching && (
+        <div className="absolute inset-0 z-20 bg-white rounded-full animate-pulse opacity-20" />
+      )}
     </div>
   );
 };
@@ -217,11 +227,18 @@ export default function App() {
             if (msg.toolCall) {
               for (const fc of msg.toolCall.functionCalls) {
                 if (fc.name === 'switchToSam') {
+                  // Trigger Auditory and Visual handoff
+                  if (audioContexts.current.output) {
+                    playHandoffChime(audioContexts.current.output);
+                  }
+                  
                   setIsSwitching(true);
+                  setTranscripts(prev => [...prev, { role: 'system', text: 'URGENT: ELEVATING TO LEAD DISPATCH...', timestamp: new Date() }]);
+                  
                   setTimeout(() => {
                     setCurrentPersona(AgentPersona.SAM);
                     setIsSwitching(false);
-                  }, 1800);
+                  }, 2200);
                 }
                 session.sendToolResponse({ functionResponses: { id: fc.id, name: fc.name, response: { result: "ok" } } });
               }
@@ -257,8 +274,8 @@ export default function App() {
       
       {/* Dynamic Background Blobs */}
       <div className="mesh-gradient">
-        <div className={`mesh-blob bg-${isChloe ? 'emerald-300' : 'rose-300'} top-[-10%] left-[-10%]`} />
-        <div className={`mesh-blob bg-${isChloe ? 'cyan-300' : 'orange-300'} bottom-[-10%] right-[-10%] animation-delay-2000`} />
+        <div className={`mesh-blob bg-${isChloe ? 'emerald-300' : 'rose-300'} top-[-10%] left-[-10%] transition-colors duration-1000`} />
+        <div className={`mesh-blob bg-${isChloe ? 'cyan-300' : 'orange-300'} bottom-[-10%] right-[-10%] animation-delay-2000 transition-colors duration-1000`} />
       </div>
 
       <header className="w-full max-w-7xl flex items-center justify-between mb-12 relative z-10">
@@ -269,7 +286,7 @@ export default function App() {
           <div>
             <h1 className="text-3xl font-[900] tracking-tighter text-slate-900 uppercase italic">Green Choice</h1>
             <div className="flex items-center gap-3">
-              <span className={`text-[11px] font-black ${isChloe ? 'text-emerald-600' : 'text-rose-600'} tracking-[0.2em] uppercase`}>GTA Dispatch Hub</span>
+              <span className={`text-[11px] font-black ${isChloe ? 'text-emerald-600' : 'text-rose-600'} tracking-[0.2em] uppercase transition-colors duration-700`}>GTA Dispatch Hub</span>
               <div className="w-1.5 h-1.5 bg-slate-300 rounded-full" />
               <div className="flex items-center gap-1.5">
                  <Signal className={`w-3.5 h-3.5 ${isConnected ? 'text-blue-500 animate-pulse' : 'text-slate-300'}`} />
@@ -281,12 +298,12 @@ export default function App() {
 
         <div className="hidden lg:flex items-center gap-6">
           <div className="glass-container px-6 py-3 rounded-2xl flex items-center gap-3">
-             <div className={`w-2 h-2 rounded-full ${isConnected ? 'bg-emerald-500 animate-ping' : 'bg-slate-300'}`} />
+             <div className={`w-2 h-2 rounded-full ${isConnected ? (isChloe ? 'bg-emerald-500' : 'bg-rose-500') + ' animate-ping' : 'bg-slate-300'} transition-colors duration-700`} />
              <span className="text-xs font-black text-slate-700 uppercase tracking-widest">{isConnected ? 'Link Established' : 'System Standby'}</span>
           </div>
           <div className="bg-white p-2 rounded-2xl shadow-xl">
              <div className="flex items-center gap-2 px-3 py-1 bg-slate-50 rounded-xl border border-slate-100">
-               <MapPin className={`w-4 h-4 ${isChloe ? 'text-emerald-500' : 'text-rose-500'}`} />
+               <MapPin className={`w-4 h-4 ${isChloe ? 'text-emerald-500' : 'text-rose-500'} transition-colors duration-700`} />
                <span className="text-[10px] font-black text-slate-600 uppercase">Toronto Regional Hub</span>
              </div>
           </div>
@@ -305,9 +322,9 @@ export default function App() {
                colorClass={isChloe ? 'bg-emerald-500' : 'bg-rose-500'} 
              />
              <HighVisibilityMetric 
-               icon={Clock} 
-               label="Avg Response" 
-               value="14ms Latency" 
+               icon={Volume2} 
+               label="Audio Transmit" 
+               value="Real-time PCM" 
                colorClass={isChloe ? 'bg-cyan-500' : 'bg-orange-500'} 
              />
              <HighVisibilityMetric 
@@ -318,7 +335,7 @@ export default function App() {
              />
           </div>
 
-          <div className={`p-8 rounded-[2.5rem] ${isChloe ? 'bg-gradient-to-br from-emerald-600 to-teal-700' : 'bg-gradient-to-br from-rose-600 to-orange-700'} text-white shadow-2xl relative overflow-hidden group`}>
+          <div className={`p-8 rounded-[2.5rem] transition-all duration-1000 ${isChloe ? 'bg-gradient-to-br from-emerald-600 to-teal-700' : 'bg-gradient-to-br from-rose-600 to-orange-700'} text-white shadow-2xl relative overflow-hidden group`}>
              <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:scale-125 transition-transform">
                <Sparkles className="w-24 h-24" />
              </div>
@@ -328,27 +345,29 @@ export default function App() {
                  <span className="text-xs font-black uppercase tracking-widest">Active Intelligence</span>
                </div>
                <p className="text-sm font-bold leading-relaxed opacity-90 italic">
-                 "Chloe is currently optimizing East York heat-pump leads while Sam manages emergency cold-alerts."
+                 {isChloe 
+                  ? "Chloe is prioritizing residential leads. Detecting distress signals will trigger immediate Sam escalation." 
+                  : "Sam is now leading the priority emergency dispatch. Emergency services are on standby."}
                </p>
              </div>
           </div>
         </div>
 
         {/* Center Portal Section */}
-        <div className={`lg:col-span-6 glass-container rounded-[4rem] p-12 flex flex-col items-center justify-center relative overflow-hidden transition-all duration-1000 min-h-[640px] shadow-[0_50px_100px_-20px_rgba(0,0,0,0.1)] ${isChloe ? 'agent-glow-chloe' : 'agent-glow-sam'}`}>
+        <div className={`lg:col-span-6 glass-container rounded-[4rem] p-12 flex flex-col items-center justify-center relative overflow-hidden transition-all duration-1000 min-h-[640px] shadow-[0_50px_100px_-20px_rgba(0,0,0,0.1)] ${isChloe ? 'agent-glow-chloe' : 'agent-glow-sam'} ${isSwitching ? 'scale-[0.98] ring-4 ring-white' : ''}`}>
           
           <div className="absolute top-12 flex items-center gap-3 px-6 py-2 bg-white rounded-full shadow-lg border border-slate-100">
-            <div className={`w-2.5 h-2.5 rounded-full ${isConnected ? (isChloe ? 'bg-emerald-500' : 'bg-rose-500') : 'bg-slate-300'} animate-pulse`} />
+            <div className={`w-2.5 h-2.5 rounded-full ${isConnected ? (isChloe ? 'bg-emerald-500' : 'bg-rose-500') : 'bg-slate-300'} ${isConnected ? 'animate-pulse' : ''} transition-colors duration-700`} />
             <span className="text-[11px] font-black uppercase text-slate-800 tracking-[0.2em]">Voice Gateway Active</span>
           </div>
 
-          <AudioVisualizerPortal volume={volumeLevel} persona={currentPersona} isActive={isConnected} />
+          <AudioVisualizerPortal volume={volumeLevel} persona={currentPersona} isActive={isConnected} isSwitching={isSwitching} />
 
           <div className="mt-12 text-center">
-            <h2 className="text-6xl font-[1000] tracking-tighter text-slate-900 italic drop-shadow-sm">
+            <h2 className={`text-6xl font-[1000] tracking-tighter text-slate-900 italic drop-shadow-sm transition-all duration-500 ${isSwitching ? 'blur-sm opacity-50' : ''}`}>
               {isChloe ? 'Chloe' : 'Sam'}
             </h2>
-            <div className={`inline-flex items-center gap-2 mt-4 px-4 py-1.5 rounded-xl text-[11px] font-black uppercase tracking-[0.2em] transition-all duration-500 ${isChloe ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'}`}>
+            <div className={`inline-flex items-center gap-2 mt-4 px-4 py-1.5 rounded-xl text-[11px] font-black uppercase tracking-[0.2em] transition-all duration-1000 ${isChloe ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'} ${isSwitching ? 'animate-bounce' : ''}`}>
               {isChloe ? <ThermometerSun className="w-4 h-4" /> : <ShieldAlert className="w-4 h-4" />}
               {isChloe ? 'Efficiency Specialist' : 'Priority Dispatch Lead'}
             </div>
@@ -363,11 +382,11 @@ export default function App() {
                    : isChloe 
                      ? 'bg-emerald-600 text-white shadow-emerald-200' 
                      : 'bg-rose-600 text-white shadow-rose-200'
-               }`}
+               } ${isSwitching ? 'opacity-20 cursor-not-allowed' : ''}`}
+               disabled={isSwitching}
              >
                {isConnected ? <PhoneOff className="w-6 h-6" /> : <Phone className="w-6 h-6 animate-pulse" />}
                <span>{isConnected ? 'Kill Link' : 'Secure Call'}</span>
-               {/* Shimmer effect for high-conversion visibility */}
                {!isConnected && <div className="absolute inset-0 shimmer opacity-30" />}
              </button>
           </div>
@@ -392,14 +411,16 @@ export default function App() {
                  </div>
                ) : (
                  transcripts.map((t, i) => (
-                   <div key={i} className="animate-in slide-in-from-bottom-4 duration-700">
+                   <div key={i} className={`animate-in slide-in-from-bottom-4 duration-700 ${t.role === 'system' ? 'opacity-100' : ''}`}>
                       <div className="flex items-center justify-between mb-3">
-                        <span className={`text-[10px] font-black ${isChloe ? 'text-emerald-600' : 'text-rose-600'} uppercase tracking-widest`}>External Source</span>
+                        <span className={`text-[10px] font-black ${t.role === 'system' ? 'text-red-600' : (isChloe ? 'text-emerald-600' : 'text-rose-600')} uppercase tracking-widest transition-colors`}>
+                          {t.role === 'system' ? 'SYSTEM OVERRIDE' : 'External Source'}
+                        </span>
                         <span className="text-[9px] font-bold text-slate-400 bg-white px-2 py-0.5 rounded-md shadow-sm">{t.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                       </div>
-                      <div className="text-sm text-slate-700 font-bold leading-relaxed bg-white/80 p-5 rounded-[2rem] shadow-sm border border-slate-50 relative">
+                      <div className={`text-sm font-bold leading-relaxed p-5 rounded-[2rem] shadow-sm border relative transition-all duration-500 ${t.role === 'system' ? 'bg-red-50 text-red-700 border-red-200 animate-pulse' : 'bg-white/80 text-slate-700 border-slate-50'}`}>
                         {t.text}
-                        <div className={`absolute top-4 -left-1 w-1.5 h-6 rounded-full ${isChloe ? 'bg-emerald-400' : 'bg-rose-400'}`} />
+                        <div className={`absolute top-4 -left-1 w-1.5 h-6 rounded-full ${t.role === 'system' ? 'bg-red-600' : (isChloe ? 'bg-emerald-400' : 'bg-rose-400')}`} />
                       </div>
                    </div>
                  ))
@@ -436,25 +457,34 @@ export default function App() {
         </div>
       </footer>
 
-      {/* Extreme Priority Switcher Overlay */}
+      {/* Extreme Priority Switcher Overlay (Enhanced Transitions) */}
       {isSwitching && (
-        <div className="fixed inset-0 z-50 bg-rose-600/95 backdrop-blur-3xl flex flex-col items-center justify-center animate-in fade-in duration-500 p-8">
+        <div className="fixed inset-0 z-50 bg-rose-600/95 backdrop-blur-[40px] flex flex-col items-center justify-center animate-in fade-in zoom-in duration-300 p-8">
            <div className="relative group max-w-lg w-full">
-              <div className="absolute inset-0 bg-white blur-[120px] opacity-20 animate-pulse" />
-              <div className="relative bg-white/10 p-16 rounded-[4rem] border-2 border-white/20 shadow-2xl flex flex-col items-center gap-10">
-                 <div className="w-32 h-32 bg-white rounded-full flex items-center justify-center animate-bounce shadow-[0_0_50px_rgba(255,255,255,0.4)]">
+              {/* White Flash Effect */}
+              <div className="absolute inset-0 bg-white blur-[150px] opacity-30 animate-pulse" />
+              
+              <div className="relative bg-white/10 p-16 rounded-[4rem] border-2 border-white/20 shadow-[0_0_80px_rgba(255,255,255,0.1)] flex flex-col items-center gap-10">
+                 <div className="w-32 h-32 bg-white rounded-full flex items-center justify-center animate-bounce shadow-[0_0_50px_rgba(255,255,255,0.5)]">
                     <ShieldAlert className="w-16 h-16 text-rose-600" />
                  </div>
                  <div className="text-center space-y-4">
-                   <h2 className="text-5xl font-[1000] text-white tracking-tighter italic">PRIORITY RED ALERT</h2>
-                   <p className="text-rose-100 font-black uppercase tracking-[0.4em] text-sm">Transferring to Lead Dispatch Sam</p>
+                   <h2 className="text-5xl font-[1000] text-white tracking-tighter italic animate-pulse">PRIORITY RED ALERT</h2>
+                   <p className="text-rose-100 font-black uppercase tracking-[0.4em] text-xs">Elevating Link to Priority Sam</p>
                  </div>
+                 
+                 {/* Progress Bars */}
                  <div className="flex gap-3 w-full">
                    {[0,1,2,3].map(i => (
-                     <div key={i} className="flex-1 h-2.5 bg-white/10 rounded-full overflow-hidden">
-                       <div className="w-full h-full bg-white animate-[loading_2s_infinite] shadow-[0_0_15px_white]" style={{ animationDelay: `${i*0.25}s` }} />
+                     <div key={i} className="flex-1 h-3 bg-white/10 rounded-full overflow-hidden">
+                       <div className="w-full h-full bg-white animate-[loading_2s_infinite] shadow-[0_0_20px_white]" style={{ animationDelay: `${i*0.25}s` }} />
                      </div>
                    ))}
+                 </div>
+
+                 <div className="flex items-center gap-3 text-white/60 text-[10px] font-black uppercase tracking-widest animate-pulse">
+                    <Radio className="w-3 h-3" />
+                    Bypassing Routine Latency...
                  </div>
               </div>
            </div>
