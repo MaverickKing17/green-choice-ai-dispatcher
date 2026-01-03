@@ -23,14 +23,20 @@ GTA Context: Mention "East York", "Scarborough", or "North York" naturally if ap
 
 const switchToSamTool: FunctionDeclaration = {
   name: 'switchToSam',
-  description: 'Persona handoff to emergency mode.',
-  parameters: { type: Type.OBJECT, properties: {} },
+  parameters: {
+    type: Type.OBJECT,
+    description: 'Persona handoff to emergency mode.',
+    properties: {},
+  },
 };
 
 const startSurveyTool: FunctionDeclaration = {
   name: 'startSurvey',
-  description: 'Wrap up call.',
-  parameters: { type: Type.OBJECT, properties: {} },
+  parameters: {
+    type: Type.OBJECT,
+    description: 'Wrap up call.',
+    properties: {},
+  },
 };
 
 const tools = [{ functionDeclarations: [switchToSamTool, startSurveyTool] }];
@@ -39,7 +45,6 @@ const tools = [{ functionDeclarations: [switchToSamTool, startSurveyTool] }];
 function playHandoffChime(ctx: AudioContext) {
   const now = ctx.currentTime;
   
-  // Create a pleasant but urgent 2-tone chime
   const playTone = (freq: number, start: number, duration: number, type: OscillatorType = 'sine') => {
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
@@ -105,19 +110,16 @@ const AudioVisualizerPortal: React.FC<{ volume: number; persona: AgentPersona; i
 
   return (
     <div className={`relative flex items-center justify-center w-80 h-80 transition-all duration-300 ${isSwitching ? 'scale-110 rotate-6' : ''}`}>
-      {/* Background Blooming Glow */}
       <div 
         className={`absolute inset-0 rounded-full bg-gradient-to-br ${primaryColor} ${secondaryColor} ${isSwitching ? 'opacity-40 blur-[100px]' : 'opacity-[0.15] blur-[60px]'} transition-all duration-700`}
         style={{ transform: `scale(${scale * 1.4})` }}
       />
       
-      {/* Dynamic Spectrum Rings */}
       <div 
         className={`absolute inset-0 rounded-full border-[3px] border-${accentColor}-500/10 transition-all duration-300 ${isSwitching ? 'border-white animate-ping' : ''}`}
         style={{ transform: `scale(${scale * 1.15})` }}
       />
 
-      {/* Radial Frequency Spectrum */}
       <div className="absolute inset-0 flex items-center justify-center">
         {Array.from({ length: 60 }).map((_, i) => (
           <div
@@ -133,7 +135,6 @@ const AudioVisualizerPortal: React.FC<{ volume: number; persona: AgentPersona; i
         ))}
       </div>
 
-      {/* The Agent Portal */}
       <div className={`relative w-48 h-48 rounded-[3rem] p-1.5 rotate-3 transition-all duration-700 ${isChloe ? 'agent-glow-chloe bg-emerald-500/10' : 'agent-glow-sam bg-rose-500/10'} overflow-hidden shadow-2xl ${isSwitching ? 'blur-sm scale-95 opacity-50' : ''}`}>
         <div className="w-full h-full rounded-[2.8rem] overflow-hidden bg-white ring-4 ring-white/80 shadow-inner">
           <img 
@@ -150,7 +151,6 @@ const AudioVisualizerPortal: React.FC<{ volume: number; persona: AgentPersona; i
         )}
       </div>
 
-      {/* Transition Flash */}
       {isSwitching && (
         <div className="absolute inset-0 z-20 bg-white rounded-full animate-pulse opacity-20" />
       )}
@@ -205,7 +205,7 @@ export default function App() {
           responseModalities: [Modality.AUDIO],
           systemInstruction: SYSTEM_INSTRUCTION,
           tools: tools,
-          inputAudioTranscription: { model: 'gemini-2.5-flash-native-audio-preview-09-2025' }, 
+          inputAudioTranscription: {}, // Fixed: Must be empty object to enable transcription
         },
         callbacks: {
           onopen: () => {
@@ -227,7 +227,6 @@ export default function App() {
             if (msg.toolCall) {
               for (const fc of msg.toolCall.functionCalls) {
                 if (fc.name === 'switchToSam') {
-                  // Trigger Auditory and Visual handoff
                   if (audioContexts.current.output) {
                     playHandoffChime(audioContexts.current.output);
                   }
@@ -272,7 +271,6 @@ export default function App() {
   return (
     <div className={`min-h-screen relative flex flex-col items-center p-6 sm:p-12 transition-all duration-1000 ${isChloe ? 'bg-emerald-50' : 'bg-rose-50'}`}>
       
-      {/* Dynamic Background Blobs */}
       <div className="mesh-gradient">
         <div className={`mesh-blob bg-${isChloe ? 'emerald-300' : 'rose-300'} top-[-10%] left-[-10%] transition-colors duration-1000`} />
         <div className={`mesh-blob bg-${isChloe ? 'cyan-300' : 'orange-300'} bottom-[-10%] right-[-10%] animation-delay-2000 transition-colors duration-1000`} />
@@ -312,7 +310,6 @@ export default function App() {
 
       <main className="w-full max-w-7xl grid grid-cols-1 lg:grid-cols-12 gap-10 items-start relative z-10">
         
-        {/* Left Stats Section */}
         <div className="lg:col-span-3 space-y-6">
           <div className="flex flex-col gap-4">
              <HighVisibilityMetric 
@@ -353,7 +350,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* Center Portal Section */}
         <div className={`lg:col-span-6 glass-container rounded-[4rem] p-12 flex flex-col items-center justify-center relative overflow-hidden transition-all duration-1000 min-h-[640px] shadow-[0_50px_100px_-20px_rgba(0,0,0,0.1)] ${isChloe ? 'agent-glow-chloe' : 'agent-glow-sam'} ${isSwitching ? 'scale-[0.98] ring-4 ring-white' : ''}`}>
           
           <div className="absolute top-12 flex items-center gap-3 px-6 py-2 bg-white rounded-full shadow-lg border border-slate-100">
@@ -379,9 +375,7 @@ export default function App() {
                className={`w-full py-6 rounded-[2rem] font-black text-lg tracking-[0.1em] uppercase transition-all duration-500 flex items-center justify-center gap-4 shadow-[0_20px_40px_-10px_rgba(0,0,0,0.1)] hover:-translate-y-2 hover:shadow-[0_30px_60px_-10px_rgba(0,0,0,0.2)] active:translate-y-0 relative overflow-hidden ${
                  isConnected 
                    ? 'bg-slate-900 text-white' 
-                   : isChloe 
-                     ? 'bg-emerald-600 text-white shadow-emerald-200' 
-                     : 'bg-rose-600 text-white shadow-rose-200'
+                   : 'bg-blue-600 text-white shadow-blue-200'
                } ${isSwitching ? 'opacity-20 cursor-not-allowed' : ''}`}
                disabled={isSwitching}
              >
@@ -392,7 +386,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* Right Log Section */}
         <div className="lg:col-span-3">
           <div className="glass-container rounded-[3rem] h-[640px] flex flex-col overflow-hidden shadow-2xl">
             <div className="p-8 border-b border-slate-100/50 bg-white/40 flex items-center justify-between">
@@ -457,11 +450,9 @@ export default function App() {
         </div>
       </footer>
 
-      {/* Extreme Priority Switcher Overlay (Enhanced Transitions) */}
       {isSwitching && (
         <div className="fixed inset-0 z-50 bg-rose-600/95 backdrop-blur-[40px] flex flex-col items-center justify-center animate-in fade-in zoom-in duration-300 p-8">
            <div className="relative group max-w-lg w-full">
-              {/* White Flash Effect */}
               <div className="absolute inset-0 bg-white blur-[150px] opacity-30 animate-pulse" />
               
               <div className="relative bg-white/10 p-16 rounded-[4rem] border-2 border-white/20 shadow-[0_0_80px_rgba(255,255,255,0.1)] flex flex-col items-center gap-10">
@@ -473,7 +464,6 @@ export default function App() {
                    <p className="text-rose-100 font-black uppercase tracking-[0.4em] text-xs">Elevating Link to Priority Sam</p>
                  </div>
                  
-                 {/* Progress Bars */}
                  <div className="flex gap-3 w-full">
                    {[0,1,2,3].map(i => (
                      <div key={i} className="flex-1 h-3 bg-white/10 rounded-full overflow-hidden">
