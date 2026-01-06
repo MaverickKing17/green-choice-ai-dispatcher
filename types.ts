@@ -1,6 +1,7 @@
+
 export enum AgentPersona {
   CHLOE = 'CHLOE',
-  SAM = 'SAM'
+  MIKE = 'MIKE'
 }
 
 export interface MessageLog {

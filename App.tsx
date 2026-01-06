@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { GoogleGenAI, LiveServerMessage, Modality, Type, FunctionDeclaration } from "@google/genai";
 import { AgentPersona, MessageLog, BlobData } from './types';
@@ -6,7 +7,8 @@ import {
   ThermometerSun, ShieldAlert, 
   MapPin, Signal, Radio, 
   Zap, ShieldCheck, Sparkles, 
-  Volume2, Download, User, Bot, Server
+  Volume2, Download, User, Bot, Server,
+  AlertTriangle, Clock
 } from 'lucide-react';
 
 const API_KEY = (process.env.API_KEY || '');
@@ -14,22 +16,28 @@ const MODEL_NAME = 'gemini-2.5-flash-native-audio-preview-09-2025';
 
 const SYSTEM_INSTRUCTION = `
 You are the Voice AI system for 'Green Choice Heating & Cooling' in East York.
-PERSONA 1: CHLOE (Lead Gen & Rebates). Tone: Polished, warm, persuasive.
-PERSONA 2: SAM (Emergency). Tone: Tactical, authoritative, lightning-fast.
+You operate with two distinct personas.
 
-Detection Protocol: If you hear "water leaking", "cold house", "no heat", "sparks", or "scary noise", transfer to Sam immediately.
+PERSONA 1: CHLOE (Front-Desk / Lead Gen). 
+Tone: Friendly, professional, warm, and highly persuasive. 
+Expertise: General inquiries on products, services, and special government rebates (like the 2026 HRS program).
+Goal: Collect Name, Phone, and Heating Type for non-emergencies.
+
+PERSONA 2: MIKE (Emergency Dispatch). 
+Tone: Tactical, authoritative, calm, and lightning-fast.
+Trigger: If the user mentions "gas leak", "water leak", "weird smell", "no heat", "sparks", "banging noises", or any urgent problem.
+Handoff Rule: Chloe must say: "That sounds urgent. Let me get Mike, our emergency specialist, on the line for you immediately."
+Mike's Task: Ask for the address and confirm a 4-hour response guarantee.
+
+Detection Protocol: If you hear any of the emergency triggers above, call the 'switchToMike' tool immediately.
 GTA Context: Mention "East York", "Scarborough", or "North York" naturally if appropriate.
-
-Capabilities: 
-- You can trigger a handoff to Sam if an emergency is detected.
-- You can download the current transcript if the user asks to "save the conversation", "download transcript", or "export our chat".
 `;
 
-const switchToSamTool: FunctionDeclaration = {
-  name: 'switchToSam',
+const switchToMikeTool: FunctionDeclaration = {
+  name: 'switchToMike',
   parameters: {
     type: Type.OBJECT,
-    description: 'Persona handoff to emergency mode.',
+    description: 'Persona handoff to emergency dispatch mode for Mike.',
     properties: {},
   },
 };
@@ -43,7 +51,7 @@ const downloadTranscriptTool: FunctionDeclaration = {
   },
 };
 
-const tools = [{ functionDeclarations: [switchToSamTool, downloadTranscriptTool] }];
+const tools = [{ functionDeclarations: [switchToMikeTool, downloadTranscriptTool] }];
 
 // --- Sound Synthesizer ---
 function playHandoffChime(ctx: AudioContext) {
@@ -124,12 +132,12 @@ const AudioVisualizer: React.FC<{ volume: number; persona: AgentPersona; isActiv
       </div>
 
       {/* Profile Image Container */}
-      <div className={`relative w-56 h-56 rounded-[3.5rem] p-1.5 transition-all duration-700 glass-card ${isChloe ? 'agent-glow-chloe' : 'agent-glow-sam'} ${isSwitching ? 'blur-sm scale-90' : 'hover:scale-105'}`}>
+      <div className={`relative w-56 h-56 rounded-[3.5rem] p-1.5 transition-all duration-700 glass-card ${isChloe ? 'agent-glow-chloe' : 'agent-glow-mike'} ${isSwitching ? 'blur-sm scale-90' : 'hover:scale-105'}`}>
         <div className="w-full h-full rounded-[3.2rem] overflow-hidden bg-white shadow-inner relative">
           <img 
             src={isChloe 
               ? "https://images.unsplash.com/photo-1594744803329-e58b31de8bf5?auto=format&fit=crop&q=80&w=400&h=400" 
-              : "https://images.unsplash.com/photo-1519085185756-62002b3ad159?auto=format&fit=crop&q=80&w=400&h=400"
+              : "https://images.unsplash.com/photo-1552058544-f2b08422138a?auto=format&fit=crop&q=80&w=400&h=400"
             } 
             className={`w-full h-full object-cover transition-transform duration-1000 ${isActive ? 'scale-110' : 'scale-100'}`}
             alt="AI Agent"
@@ -168,10 +176,13 @@ export default function App() {
   const audioContexts = useRef<{ input: AudioContext | null; output: AudioContext | null }>({ input: null, output: null });
   const sessionRef = useRef<any>(null);
   const sourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
+  const transcriptEndRef = useRef<HTMLDivElement>(null);
 
   const transcriptsRef = useRef<MessageLog[]>([]);
   useEffect(() => {
     transcriptsRef.current = transcripts;
+    // Auto-scroll to bottom when transcripts change
+    transcriptEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [transcripts]);
 
   const disconnect = useCallback(() => {
@@ -181,6 +192,7 @@ export default function App() {
     sourcesRef.current.forEach(s => { try { s.stop(); } catch(e) {} });
     setIsConnected(false);
     setVolumeLevel(0);
+    setCurrentPersona(AgentPersona.CHLOE);
   }, []);
 
   const downloadTranscript = useCallback(() => {
@@ -202,6 +214,23 @@ export default function App() {
     a.click();
     URL.revokeObjectURL(url);
   }, []);
+
+  const handleManualSwitch = useCallback(() => {
+    if (currentPersona === AgentPersona.MIKE || isSwitching) return;
+    
+    if (audioContexts.current.output) playHandoffChime(audioContexts.current.output);
+    setIsSwitching(true);
+    setTranscripts(prev => [...prev, { 
+      role: 'system', 
+      text: 'MANUAL OVERRIDE: USER TRIGGERED EMERGENCY PROTOCOL (MIKE)...', 
+      timestamp: new Date() 
+    }]);
+    
+    setTimeout(() => {
+      setCurrentPersona(AgentPersona.MIKE);
+      setIsSwitching(false);
+    }, 2500);
+  }, [currentPersona, isSwitching]);
 
   const connect = async () => {
     try {
@@ -239,12 +268,12 @@ export default function App() {
           onmessage: async (msg) => {
             if (msg.toolCall) {
               for (const fc of msg.toolCall.functionCalls) {
-                if (fc.name === 'switchToSam') {
+                if (fc.name === 'switchToMike') {
                   if (audioContexts.current.output) playHandoffChime(audioContexts.current.output);
                   setIsSwitching(true);
-                  setTranscripts(prev => [...prev, { role: 'system', text: 'URGENT: ELEVATING TO LEAD DISPATCH (SAM)...', timestamp: new Date() }]);
+                  setTranscripts(prev => [...prev, { role: 'system', text: 'URGENT: ELEVATING TO EMERGENCY DISPATCH (MIKE)...', timestamp: new Date() }]);
                   setTimeout(() => {
-                    setCurrentPersona(AgentPersona.SAM);
+                    setCurrentPersona(AgentPersona.MIKE);
                     setIsSwitching(false);
                   }, 2500);
                 } else if (fc.name === 'downloadTranscript') {
@@ -354,14 +383,14 @@ export default function App() {
                <p className="text-lg font-bold leading-tight tracking-tight">
                  {isChloe 
                   ? "Chloe is analyzing service history and rebate eligibility for high-tier incentives." 
-                  : "Sam has taken control. Emergency dispatch protocols are prioritizing life-safety scenarios."}
+                  : "Mike has taken control. Emergency dispatch protocols are prioritizing life-safety scenarios."}
                </p>
              </div>
           </div>
         </div>
 
         {/* Center Visualizer Column */}
-        <div className={`lg:col-span-6 glass-card rounded-[4rem] p-10 flex flex-col items-center justify-center relative overflow-hidden transition-all duration-1000 shadow-2xl ${isChloe ? 'agent-glow-chloe' : 'agent-glow-sam'} ${isSwitching ? 'scale-[0.97]' : ''}`}>
+        <div className={`lg:col-span-6 glass-card rounded-[4rem] p-10 flex flex-col items-center justify-center relative overflow-hidden transition-all duration-1000 shadow-2xl ${isChloe ? 'agent-glow-chloe' : 'agent-glow-mike'} ${isSwitching ? 'scale-[0.97]' : ''}`}>
           
           <div className="absolute top-10 flex items-center gap-4 px-8 py-3 bg-white rounded-3xl shadow-lg border border-slate-100">
             <Activity className={`w-5 h-5 ${isConnected ? 'text-blue-500 animate-pulse' : 'text-slate-300'}`} />
@@ -372,15 +401,15 @@ export default function App() {
 
           <div className="mt-8 text-center space-y-3">
             <h2 className={`text-7xl font-[1000] tracking-tighter text-slate-950 italic transition-all duration-700 ${isSwitching ? 'blur-md opacity-0' : 'opacity-100'}`}>
-              {isChloe ? 'Chloe' : 'Sam'}
+              {isChloe ? 'Chloe' : 'Mike'}
             </h2>
             <div className={`inline-flex items-center gap-3 px-6 py-2.5 rounded-2xl text-[12px] font-black uppercase tracking-[0.25em] transition-all duration-1000 shadow-sm ${isChloe ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
               {isChloe ? <ThermometerSun className="w-5 h-5" /> : <ShieldAlert className="w-5 h-5" />}
-              {isChloe ? 'HVAC Rebate Lead' : 'Emergency Specialist'}
+              {isChloe ? 'Front-Desk Specialist' : 'Emergency Dispatch'}
             </div>
           </div>
 
-          <div className="w-full max-w-[340px] mt-12">
+          <div className="w-full max-w-[340px] mt-12 flex flex-col gap-4">
              <button
                onClick={isConnected ? disconnect : connect}
                className={`w-full py-7 rounded-[2.5rem] font-black text-xl tracking-widest uppercase transition-all duration-500 flex items-center justify-center gap-5 shadow-2xl hover:-translate-y-2 active:translate-y-0 relative overflow-hidden ${
@@ -393,6 +422,17 @@ export default function App() {
                <span>{isConnected ? 'Kill Link' : 'Secure Call'}</span>
                {!isConnected && <div className="absolute inset-0 shimmer opacity-20" />}
              </button>
+
+             {/* Manual Trigger Button */}
+             {isConnected && isChloe && !isSwitching && (
+               <button
+                 onClick={handleManualSwitch}
+                 className="w-full py-5 rounded-[2rem] bg-rose-600 text-white font-black text-sm tracking-[0.2em] uppercase transition-all duration-300 flex items-center justify-center gap-3 shadow-xl hover:bg-rose-700 hover:-translate-y-1 active:translate-y-0 group border-2 border-rose-400/30"
+               >
+                 <AlertTriangle className="w-5 h-5 group-hover:animate-bounce" />
+                 <span>Emergency? Trigger Mike</span>
+               </button>
+             )}
           </div>
         </div>
 
@@ -414,39 +454,59 @@ export default function App() {
                </button>
             </div>
             
-            <div className="flex-1 overflow-y-auto p-8 space-y-8 scrollbar-hide">
+            <div className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-hide scroll-smooth">
                {transcripts.length === 0 ? (
-                 <div className="h-full flex flex-col items-center justify-center text-slate-300 text-center gap-8">
-                    <Activity className="w-20 h-20 opacity-20 animate-pulse" />
-                    <p className="text-xs font-black uppercase tracking-[0.2em] leading-relaxed max-w-[180px] text-slate-400">Waiting for Voice Link...</p>
+                 <div className="h-full flex flex-col items-center justify-center text-slate-300 text-center gap-8 py-10">
+                    <Activity className="w-16 h-16 opacity-10 animate-pulse" />
+                    <p className="text-[10px] font-black uppercase tracking-[0.3em] leading-relaxed max-w-[200px] text-slate-400">Secure Voice Transmission Buffer Standby...</p>
                  </div>
                ) : (
-                 transcripts.map((t, i) => (
-                   <div key={i} className="animate-in slide-in-from-bottom-6 duration-500">
-                      <div className="flex items-center justify-between mb-2 px-2">
-                        <div className="flex items-center gap-2">
-                           {t.role === 'user' ? <User className="w-3.5 h-3.5 text-slate-400" /> : (t.role === 'model' ? <Bot className="w-3.5 h-3.5 text-blue-500" /> : <Server className="w-3.5 h-3.5 text-rose-500" />)}
-                           <span className={`text-[11px] font-black uppercase tracking-widest ${t.role === 'system' ? 'text-rose-600' : (t.role === 'model' ? 'text-blue-600' : 'text-slate-500')}`}>
-                             {t.role === 'system' ? 'SYSTEM' : (t.role === 'model' ? 'AI AGENT' : 'YOU')}
-                           </span>
+                 <>
+                   {transcripts.map((t, i) => (
+                     <div key={i} className="animate-message flex flex-col gap-1.5">
+                        <div className="flex items-center justify-between px-3">
+                          <div className="flex items-center gap-2">
+                             {t.role === 'user' ? (
+                               <div className="w-6 h-6 rounded-lg bg-slate-100 flex items-center justify-center"><User className="w-3.5 h-3.5 text-slate-400" /></div>
+                             ) : t.role === 'model' ? (
+                               <div className={`w-6 h-6 rounded-lg ${isChloe ? 'bg-emerald-100' : 'bg-rose-100'} flex items-center justify-center`}><Bot className={`w-3.5 h-3.5 ${isChloe ? 'text-emerald-600' : 'text-rose-600'}`} /></div>
+                             ) : (
+                               <div className="w-6 h-6 rounded-lg bg-rose-100 flex items-center justify-center"><Server className="w-3.5 h-3.5 text-rose-600" /></div>
+                             )}
+                             <span className={`text-[10px] font-black uppercase tracking-[0.15em] ${t.role === 'system' ? 'text-rose-600' : (t.role === 'model' ? (isChloe ? 'text-emerald-700' : 'text-rose-700') : 'text-slate-500')}`}>
+                               {t.role === 'system' ? 'SYSTEM ALERT' : (t.role === 'model' ? (isChloe ? 'CHLOE' : 'MIKE') : 'CUSTOMER')}
+                             </span>
+                          </div>
+                          <div className="flex items-center gap-1 opacity-40">
+                             <Clock className="w-3 h-3 text-slate-400" />
+                             <span className="text-[9px] font-bold text-slate-400">{t.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                          </div>
                         </div>
-                        <span className="text-[10px] font-bold text-slate-400">{t.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                      </div>
-                      <div className={`transcript-bubble text-[15px] font-bold leading-snug p-6 rounded-[2.2rem] border transition-all ${t.role === 'system' ? 'bg-rose-50 text-rose-800 border-rose-100 italic' : (t.role === 'model' ? 'bg-blue-50/70 text-blue-950 border-blue-100' : 'bg-white text-slate-900 border-slate-100 shadow-sm')}`}>
-                        {t.text}
-                      </div>
-                   </div>
-                 ))
+                        <div className={`transcript-bubble text-[14px] font-bold leading-relaxed p-5 rounded-[1.8rem] transition-all ${
+                          t.role === 'system' 
+                            ? 'bg-rose-50 text-rose-800 border-rose-100 italic' 
+                            : (t.role === 'model' 
+                                ? (isChloe ? 'bg-emerald-50/50 text-emerald-950 border-emerald-100' : 'bg-rose-50/50 text-rose-950 border-rose-100')
+                                : 'bg-white text-slate-900 border-slate-100 shadow-sm')
+                        }`}>
+                          {t.text}
+                        </div>
+                     </div>
+                   ))}
+                   <div ref={transcriptEndRef} className="h-1 w-full" />
+                 </>
                )}
             </div>
 
-            <div className="p-10 bg-white/40 border-t border-slate-200/50">
+            <div className="p-10 bg-white/40 border-t border-slate-200/50 backdrop-blur-md">
               <div className="flex items-center justify-between text-[11px] font-black text-slate-500 uppercase tracking-widest mb-4">
-                <span>Buffer Health</span>
-                <span className="text-emerald-700">99.8%</span>
+                <span>Signal Strength</span>
+                <span className={isConnected ? 'text-emerald-700' : 'text-slate-400'}>{isConnected ? '99.8%' : 'OFF'}</span>
               </div>
               <div className="w-full h-3 bg-slate-200/50 rounded-full overflow-hidden p-0.5 border border-slate-300/30">
-                <div className={`h-full rounded-full ${isChloe ? 'bg-emerald-500' : 'bg-rose-500'} w-[90%] transition-all duration-1000 shadow-inner`} />
+                <div className={`h-full rounded-full transition-all duration-1000 shadow-inner ${
+                  !isConnected ? 'w-0 bg-slate-300' : (isChloe ? 'bg-emerald-500 w-[95%]' : 'bg-rose-500 w-[92%]')
+                }`} />
               </div>
             </div>
           </div>
@@ -482,7 +542,7 @@ export default function App() {
                  </div>
                  <div className="space-y-4">
                    <h2 className="text-6xl font-[1000] text-white tracking-tighter uppercase italic">Red Alert Elevating</h2>
-                   <p className="text-rose-200 font-black uppercase tracking-[0.6em] text-sm">Transferring to Priority Lead Sam</p>
+                   <p className="text-rose-200 font-black uppercase tracking-[0.6em] text-sm">Transferring to Priority Lead Mike</p>
                  </div>
               </div>
               

@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="en">
   <head>
@@ -10,8 +11,8 @@
       :root {
         --chloe-primary: #065f46; /* Deep Emerald */
         --chloe-accent: #10b981;
-        --sam-primary: #9f1239; /* Deep Rose */
-        --sam-accent: #f43f5e;
+        --mike-primary: #9f1239; /* Deep Rose */
+        --mike-accent: #f43f5e;
       }
       body {
         font-family: 'Plus Jakarta Sans', sans-serif;
@@ -56,17 +57,18 @@
         box-shadow: 0 0 100px -20px rgba(16, 185, 129, 0.5);
         border: 2px solid rgba(16, 185, 129, 0.4);
       }
-      .agent-glow-sam {
+      .agent-glow-mike {
         box-shadow: 0 0 100px -20px rgba(244, 63, 94, 0.5);
         border: 2px solid rgba(244, 63, 94, 0.4);
       }
       .transcript-bubble {
         position: relative;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.03);
-        transition: transform 0.2s ease;
+        box-shadow: 0 2px 12px rgba(0,0,0,0.04);
+        transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+        border: 1px solid rgba(255, 255, 255, 0.6);
       }
       .transcript-bubble:hover {
-        transform: translateY(-1px);
+        transform: scale(1.02) translateY(-2px);
       }
       .scrollbar-hide::-webkit-scrollbar {
         display: none;
@@ -82,6 +84,13 @@
       }
       .visualizer-ring {
         animation: pulse-ring 3s infinite ease-in-out;
+      }
+      @keyframes message-entry {
+        from { opacity: 0; transform: translateY(20px) scale(0.95); }
+        to { opacity: 1; transform: translateY(0) scale(1); }
+      }
+      .animate-message {
+        animation: message-entry 0.6s cubic-bezier(0.22, 1, 0.36, 1) forwards;
       }
     </style>
   <script type="importmap">
